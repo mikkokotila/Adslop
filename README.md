@@ -16,7 +16,7 @@ The advertising engine has not yet been implemented. Meta's compatibility with t
 
 Version 0.1.0 establishes the repository foundation: a minimal importable Python package, governance gates, scoped issue and pull-request workflows, a documentation build, dependency locks, and release tooling. It does not connect to advertising accounts, collect conversion events, or spend money.
 
-[SETUP.md](SETUP.md) records the GitHub activation procedure and the account prerequisites still outstanding. The checked-in protection policy requires independent review and passing checks. At initial adoption, GitHub refuses private-repository branch protection under the current account plan, both setup secrets are absent, and an independent reviewer has not been added. Committed policy is not evidence that server-side enforcement is active.
+[SETUP.md](SETUP.md) records the GitHub activation procedure and the account prerequisites still outstanding. The checked-in protection policy requires independent review and passing checks. At initial adoption, GitHub refuses private-repository branch protection under the current account plan, both setup secrets are absent, and the write-access invitation for appointed independent reviewer `bit-mis` awaits acceptance. Committed policy is not evidence that server-side enforcement is active.
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 

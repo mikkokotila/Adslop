@@ -13,7 +13,7 @@ The adoption inspection on 8 October 2026 established the following state. Reche
 | Private-repository rulesets | GitHub returned HTTP 403 for the current plan | Protected-main enforcement cannot be claimed active |
 | `REPO_BOOTSTRAP_TOKEN` | Missing | The privileged activation workflow cannot administer repository settings |
 | `RULESET_AUDIT_TOKEN` | Missing | The post-merge audit cannot independently inspect the complete live ruleset |
-| Independent reviewer | Only `mikkokotila` has authorized maintainer access | His own PR and latest push cannot be approved by the same account |
+| Independent reviewer | `bit-mis` is appointed; the write-access invitation is pending acceptance | Verify accepted access and an independent review before merge |
 | Copilot code review | Availability unverified | The declared automated-review requirement has not been demonstrated |
 | CodeQL | Unsupported in the current private configuration | Its workflow, law, configured gate, and required context are removed together |
 
@@ -30,7 +30,7 @@ gh run list --repo mikkokotila/Adslop
 
 An HTTP 403 must be resolved through the appropriate account capability or permission before ruleset activation. Confirm Copilot code review is available and can perform the automatic review declared in the snapshot.
 
-Mikko Kotila (`mikkokotila`) is the project authority in `governance.yml`. He must authorize any additional reviewer and their write access. Do not copy unrelated reviewer accounts or send invitations merely to fill a template field.
+Mikko Kotila (`mikkokotila`) is the project authority in `governance.yml`. He has authorized `bit-mis` as an independent reviewer and code owner, with repository write access. The account was verified as GitHub user ID `265471408`; invitation `336819527` was created on 8 October 2026 and is pending acceptance at this checkpoint. Recheck collaborator permission before requesting or counting a review. Do not copy unrelated reviewer accounts or send invitations merely to fill a template field.
 
 The declared ruleset requires one eligible independent approval and approval of the latest push by someone other than its pusher. A PR author cannot approve their own PR. Enforcement-file changes also require a non-author code owner's approval. An additional owner must be appointed and recorded through the governed ownership process. Copilot review does not replace the human approval. A configured project-authority name does not make GitHub enforce that single identity when its `required_reviewers` list is empty.
 

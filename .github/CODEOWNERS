@@ -1,12 +1,12 @@
 # Enforcement surfaces whose content determines merge verdicts.
 # The declared ruleset requires independent code-owner approval for changes
-# here. Only the authorized maintainer is listed; additional owners require
-# an explicit appointment and write access. See MAINTAINERS.md and SETUP.md.
+# here. Mikko appointed bit-mis for independent review; accepted write access
+# is required for review eligibility. See MAINTAINERS.md and SETUP.md.
 # No global * rule: ordinary changes retain the one-approval requirement.
 
-/CLAUDE.md @mikkokotila
-/governance/ @mikkokotila
-/.github/ @mikkokotila
-/governance.yml @mikkokotila
-/pyproject.toml @mikkokotila
-/requirements/ @mikkokotila
+/CLAUDE.md @mikkokotila @bit-mis
+/governance/ @mikkokotila @bit-mis
+/.github/ @mikkokotila @bit-mis
+/governance.yml @mikkokotila @bit-mis
+/pyproject.toml @mikkokotila @bit-mis
+/requirements/ @mikkokotila @bit-mis

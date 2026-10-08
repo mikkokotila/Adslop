@@ -8,3 +8,4 @@
 - Restrict bootstrap to applying reviewed configuration from main.
 - Validate private documentation links with repository-scoped credentials.
 - Update vulnerable documentation dependencies without lowering audit thresholds.
+- Appoint bit-mis for independent owner review and apply the authorized copyright notice.

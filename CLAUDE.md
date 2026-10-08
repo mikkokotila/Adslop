@@ -43,7 +43,7 @@ Branch off `main`. Commit the first working increment and push to a remote branc
 
 **Mikko Kotila (`mikkokotila`) is the project authority and operator.** He decides scope, appointments, and release authorization. Request an authorized, eligible independent reviewer when the PR opens and again after requested changes are addressed. Read your own full diff before requesting that review.
 
-Only Mikko is currently declared as maintainer and code owner. A PR authored or last pushed by his account cannot obtain the required independent approval from the same account. Missing reviewer access remains an explicit blocker; do not invite an unrelated account or bypass the policy. See [MAINTAINERS.md](MAINTAINERS.md). The project-authority setting does not make GitHub enforce a single reviewer identity when the ruleset's `required_reviewers` list is empty.
+Mikko remains the maintainer and has appointed `bit-mis` as an independent reviewer and code owner. A PR authored or last pushed by Mikko's account cannot obtain the required independent approval from the same account. The appointed reviewer must accept write access before GitHub can count the required review. Missing reviewer access remains an explicit blocker; do not invite an unrelated account or bypass the policy. See [MAINTAINERS.md](MAINTAINERS.md). The project-authority setting does not make GitHub enforce a single reviewer identity when the ruleset's `required_reviewers` list is empty.
 
 Each push re-runs every gate. Prefer new commits to amends — amends don't give you anything and they muddle the PR history. Keep one logical change per commit; don't batch unrelated changes together. Before you request review, read your own full diff in GitHub — catch what you'd flag in someone else's PR.
 
