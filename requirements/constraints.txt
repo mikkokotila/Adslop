@@ -30,7 +30,7 @@ coverage[toml]>=7,<8
 # Build and packaging
 build>=1,<2
 setuptools>=78,<81
-wheel>=0.45,<1
+wheel>=0.48.0,<1
 
 # Supply chain
 pip-audit>=2.7,<3
