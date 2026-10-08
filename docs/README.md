@@ -9,6 +9,8 @@ create campaigns, collect conversions, or operate a revenue optimization loop.
 
 - Read the [product specification](../SPECIFICATION.md) for planned behavior
   and acceptance requirements, including the unresolved Meta capability.
+- Read [revenue engine research](Reference/Revenue-Engine-Research.md) for Meta findings,
+  deterministic control, and the proposed collection and implementation stack.
 - Use [Guides](Guides/README.md) to build and preview these documents locally.
 - Use [Reference](Reference/README.md) for the documentation configuration.
 - Use [Developer](Developer/README.md) for contribution and verification.

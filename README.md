@@ -2,19 +2,19 @@
 
 Adslop is an API-first instrument for generating incremental revenue from digital products through systematic advertising experiments.
 
-Its first product release will provide one campaign creation and management experience across Google and Meta, keyword-based targeting, conversion tracking, and unified performance measurement. Human and agent interfaces will use the same capabilities. Event sourcing, complete available provenance, experiment manifests, and reproducible releases form the foundation.
+Its first product release will provide one campaign creation and management experience across Google and Meta, keyword-based targeting, conversion tracking, unified performance measurement, deterministic PnL-based budget allocation, keyword pruning, and campaign reconciliation. Human and agent interfaces will use the same capabilities. Event sourcing, complete available provenance, experiment manifests, and reproducible releases form the foundation.
 
 The initial operator is Mikko Kotila. The project begins as a private repository and is intended to develop into open-source software.
 
 ## Product specification
 
-Read [the prose specification](SPECIFICATION.md) for the product requirements, execution and measurement behavior, and acceptance conditions.
+Read [the prose specification](SPECIFICATION.md) for the product requirements, execution and measurement behavior, and acceptance conditions. The [research and proposed stack](docs/Reference/Revenue-Engine-Research.md) records current Meta capabilities, deterministic control methods, and collection/data architecture tradeoffs.
 
 The advertising engine has not yet been implemented. Meta's compatibility with the required keyword-targeting model remains an explicit capability dependency. Two-platform operation remains a first-release requirement.
 
 ## Current implementation
 
-Version 0.1.0 establishes the repository foundation: a minimal importable Python package, governance gates, scoped issue and pull-request workflows, a documentation build, dependency locks, and release tooling. It does not connect to advertising accounts, collect conversion events, or spend money.
+The repository foundation provides: a minimal importable Python package, governance gates, scoped issue and pull-request workflows, a documentation build, dependency locks, and release tooling. It does not connect to advertising accounts, collect conversion events, or spend money.
 
 [SETUP.md](SETUP.md) records the GitHub activation procedure and the account prerequisites still outstanding. The checked-in protection policy requires independent review and passing checks. At initial adoption, GitHub refuses private-repository branch protection under the current account plan, both setup secrets are absent, and the write-access invitation for appointed independent reviewer `bit-mis` awaits acceptance. Committed policy is not evidence that server-side enforcement is active.
 
