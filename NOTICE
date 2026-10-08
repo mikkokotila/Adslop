@@ -1,0 +1,13 @@
+Adslop
+Copyright 2026 Mikko Kotila.
+
+This repository includes an adapted MIT-licensed repository governance foundation.
+The rights holder authorized the copyright notice in LICENSE to identify
+Mikko Kotila. The MIT permission terms remain unchanged.
+Adslop-specific additions are distributed under the same MIT terms.
+
+The adopted foundation was pinned at commit
+fa7bf92caab5bb8d7f73120d4dc3526fd86c0348.
+The Adslop product specification predates this adoption and is preserved.
+
+See THIRD_PARTY.md for dependency and license-review information.

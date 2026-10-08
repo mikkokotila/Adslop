@@ -1,0 +1,57 @@
+name: pr_checks_version
+
+# The gate derives first-version eligibility from committed base/head trees.
+# Every run validates the head version and changelog; no specialization skip.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr_checks_version:
+    name: pr_checks_version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'pull_request' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install gate toolchain
+        run: python -m pip install --require-hashes -r requirements/ci/gate-tools.txt
+
+      - name: Verify PR base and run version gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ] || [ -z "$PR_TITLE" ]; then
+            echo "::error::pull_request base SHA and title are required"
+            exit 1
+          fi
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.https://github.com/.extraheader=$AUTH" fetch origin "$BASE_SHA" --depth=1
+          python governance/version_gate.py \
+            --pr-title "$PR_TITLE" \
+            --base-ref "$BASE_SHA" \
+            --pr-author "$PR_AUTHOR"

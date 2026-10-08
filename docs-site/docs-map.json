@@ -1,0 +1,160 @@
+{
+  "sections": [
+    {
+      "dir": "overview",
+      "label": "Overview",
+      "position": 1,
+      "slug": "/overview",
+      "description": "Product boundary, system story, and task routing."
+    },
+    {
+      "dir": "guides",
+      "label": "Guides",
+      "position": 2,
+      "slug": "/guides",
+      "description": "End-to-end jobs and operational workflows."
+    },
+    {
+      "dir": "reference",
+      "label": "Reference",
+      "position": 3,
+      "slug": "/reference",
+      "description": "Interfaces, schemas, defaults, outputs, and edge cases."
+    },
+    {
+      "dir": "developer",
+      "label": "Developer",
+      "position": 4,
+      "slug": "/developer",
+      "description": "Contribution, release, documentation, and maintenance."
+    },
+    {
+      "dir": "packages",
+      "label": "Packages",
+      "position": 5,
+      "slug": "/packages",
+      "description": "Package ownership, boundaries, and public entry points."
+    }
+  ],
+  "documents": [
+    {
+      "source": "README.md",
+      "dest": "index.md",
+      "slug": "/",
+      "title": "Adslop",
+      "sidebarLabel": "Home"
+    },
+    {
+      "source": "docs/README.md",
+      "dest": "overview/docs-hub.md",
+      "slug": "/overview/docs-hub",
+      "sidebarPosition": 1,
+      "sidebarLabel": "Docs hub"
+    },
+    {
+      "source": "SPECIFICATION.md",
+      "dest": "overview/specification.md",
+      "slug": "/overview/specification",
+      "sidebarPosition": 2,
+      "sidebarLabel": "Product specification (planned)"
+    },
+    {
+      "source": "docs/Guides/README.md",
+      "dest": "guides/documentation-site.md",
+      "slug": "/guides/documentation-site",
+      "sidebarPosition": 1,
+      "sidebarLabel": "Documentation site"
+    },
+    {
+      "source": "docs/Reference/README.md",
+      "dest": "reference/documentation-profile.md",
+      "slug": "/reference/documentation-profile",
+      "sidebarPosition": 1,
+      "sidebarLabel": "Documentation profile"
+    },
+    {
+      "source": "docs/Reference/Revenue-Engine-Research.md",
+      "dest": "reference/revenue-engine-research.md",
+      "slug": "/reference/revenue-engine-research",
+      "sidebarPosition": 2,
+      "sidebarLabel": "Revenue engine research"
+    },
+    {
+      "source": "docs/Developer/README.md",
+      "dest": "developer/home.md",
+      "slug": "/developer/home",
+      "sidebarPosition": 1,
+      "sidebarLabel": "Developer home"
+    },
+    {
+      "source": "docs/Developer/Documentation-System.md",
+      "dest": "developer/documentation-system.md",
+      "slug": "/developer/documentation-system",
+      "sidebarPosition": 2,
+      "sidebarLabel": "Documentation system"
+    },
+    {
+      "source": "adslop/README.md",
+      "dest": "packages/python-package.md",
+      "slug": "/packages/python-package",
+      "sidebarPosition": 1,
+      "sidebarLabel": "Python package"
+    },
+    {
+      "source": "docs/Developer/Configuration.md",
+      "dest": "developer/configuration.md",
+      "slug": "/developer/configuration",
+      "sidebarPosition": 3,
+      "sidebarLabel": "Configuration"
+    },
+    {
+      "source": "docs/Developer/Writing-Docstrings.md",
+      "dest": "developer/writing-docstrings.md",
+      "slug": "/developer/writing-docstrings",
+      "sidebarPosition": 4,
+      "sidebarLabel": "Writing docstrings"
+    },
+    {
+      "source": "docs/Developer/Technical-Debt.md",
+      "dest": "developer/technical-debt.md",
+      "slug": "/developer/technical-debt",
+      "sidebarPosition": 5,
+      "sidebarLabel": "Technical debt"
+    },
+    {
+      "source": "docs/Developer/Packaging.md",
+      "dest": "developer/packaging.md",
+      "slug": "/developer/packaging",
+      "sidebarPosition": 6,
+      "sidebarLabel": "Packaging"
+    },
+    {
+      "source": "docs/Developer/Release-Policy.md",
+      "dest": "developer/release-policy.md",
+      "slug": "/developer/release-policy",
+      "sidebarPosition": 7,
+      "sidebarLabel": "Release policy"
+    },
+    {
+      "source": "docs/Developer/Making-Release.md",
+      "dest": "developer/making-release.md",
+      "slug": "/developer/making-release",
+      "sidebarPosition": 8,
+      "sidebarLabel": "Making a release"
+    },
+    {
+      "source": "docs/Developer/Semantic-Versioning.md",
+      "dest": "developer/semantic-versioning.md",
+      "slug": "/developer/semantic-versioning",
+      "sidebarPosition": 9,
+      "sidebarLabel": "Semantic versioning"
+    },
+    {
+      "source": "docs/Developer/Security-Assurance-Case.md",
+      "dest": "developer/security-assurance-case.md",
+      "slug": "/developer/security-assurance-case",
+      "sidebarPosition": 10,
+      "sidebarLabel": "Security assurance case"
+    }
+  ]
+}

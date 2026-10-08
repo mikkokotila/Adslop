@@ -1,0 +1,8 @@
+{
+  "productId": "adslop",
+  "productName": "Adslop",
+  "tagline": "Product specification and development documentation for Adslop.",
+  "siteUrl": "http://127.0.0.1:3100",
+  "basePath": "/",
+  "sourceRepoUrl": "https://github.com/mikkokotila/Adslop"
+}

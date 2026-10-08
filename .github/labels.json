@@ -1,0 +1,122 @@
+[
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Reproducible incorrect behavior"
+  },
+  {
+    "name": "build",
+    "color": "d3d3d3",
+    "description": "Changes that affect the build system or external dependencies (e.g., build: update npm dependencies)"
+  },
+  {
+    "name": "chore",
+    "color": "d3d3d3",
+    "description": "Miscellaneous tasks that don’t modify src or test files (e.g., chore: update dependencies)."
+  },
+  {
+    "name": "ci",
+    "color": "d3d3d3",
+    "description": "Changes to CI/CD configuration or scripts (e.g., ci: update GitHub Actions workflow)."
+  },
+  {
+    "name": "dependencies",
+    "color": "0366d6",
+    "description": "Pull requests that update a dependency file"
+  },
+  {
+    "name": "docs",
+    "color": "d3d3d3",
+    "description": "Documentation-only changes (e.g., docs: update README with installation guide)."
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "A new supported capability or public surface"
+  },
+  {
+    "name": "feat",
+    "color": "d3d3d3",
+    "description": "A new feature (e.g., feat: add user authentication)."
+  },
+  {
+    "name": "fix",
+    "color": "d3d3d3",
+    "description": "A bug fix (e.g., fix: resolve login issue)."
+  },
+  {
+    "name": "github_actions",
+    "color": "000000",
+    "description": "Pull requests that update GitHub Actions code"
+  },
+  {
+    "name": "incident",
+    "color": "e11d21",
+    "description": "An operational incident affecting users"
+  },
+  {
+    "name": "incident-open",
+    "color": "ff9f1c",
+    "description": "An incident that is not yet resolved"
+  },
+  {
+    "name": "javascript",
+    "color": "168700",
+    "description": "Pull requests that update javascript code"
+  },
+  {
+    "name": "perf",
+    "color": "d3d3d3",
+    "description": "Code changes that improve performance (e.g., perf: optimize API calls)."
+  },
+  {
+    "name": "planning",
+    "color": "cfd3d7",
+    "description": "Planning"
+  },
+  {
+    "name": "Priority",
+    "color": "ffc0cb",
+    "description": "This should be prioritised above things without this label"
+  },
+  {
+    "name": "python",
+    "color": "2b67c6",
+    "description": "Pull requests that update python code"
+  },
+  {
+    "name": "refactor",
+    "color": "d3d3d3",
+    "description": "Code changes that neither fix a bug nor add a feature (e.g., refactor: improve component structure)."
+  },
+  {
+    "name": "revert",
+    "color": "d3d3d3",
+    "description": "Reverting a previous commit (e.g., revert: revert feat: add user authentication)."
+  },
+  {
+    "name": "security",
+    "color": "b60205",
+    "description": "Security-related; vulnerabilities go to private advisories"
+  },
+  {
+    "name": "slice",
+    "color": "5319e7",
+    "description": "Mechanically scoped delivery slice"
+  },
+  {
+    "name": "style",
+    "color": "d3d3d3",
+    "description": "Code style changes (e.g., formatting, missing semi-colons, etc.), not affecting the code’s meaning ("
+  },
+  {
+    "name": "support",
+    "color": "0e8a16",
+    "description": "A usage, setup, or documentation question"
+  },
+  {
+    "name": "test",
+    "color": "d3d3d3",
+    "description": "Adding or modifying tests (e.g., test: add tests for user model)."
+  }
+]

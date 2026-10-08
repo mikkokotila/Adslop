@@ -2,16 +2,64 @@
 
 Adslop is an API-first instrument for generating incremental revenue from digital products through systematic advertising experiments.
 
-Its first release will provide one campaign creation and management experience across Google and Meta, keyword-based targeting, conversion tracking, and unified performance measurement. Human and agent interfaces will use the same underlying capabilities. Event sourcing, complete available provenance, experiment manifests, and reproducible releases form the foundation.
+Its first product release will provide one campaign creation and management experience across Google and Meta, keyword-based targeting, conversion tracking, unified performance measurement, deterministic PnL-based budget allocation, keyword pruning, and campaign reconciliation. Human and agent interfaces will use the same capabilities. Event sourcing, complete available provenance, experiment manifests, and reproducible releases form the foundation.
 
-The initial operator is Mikko Kotila. The project begins in a private repository and is intended to develop into open-source software.
+The initial operator is Mikko Kotila. The project begins as a private repository and is intended to develop into open-source software.
 
-## Specification
+## Product specification
 
-Read [the prose specification](SPECIFICATION.md) for the product, first-release requirements, execution and measurement behavior, and acceptance conditions.
+Read [the prose specification](SPECIFICATION.md) for the product requirements, execution and measurement behavior, and acceptance conditions. The [research and proposed stack](docs/Reference/Revenue-Engine-Research.md) records current Meta capabilities, deterministic control methods, and collection/data architecture tradeoffs.
 
-The first implementation has not yet been built. Meta's compatibility with the required keyword-targeting model remains an explicit capability dependency. Two-platform operation remains a first-release requirement.
+The advertising engine has not yet been implemented. Meta's compatibility with the required keyword-targeting model remains an explicit capability dependency. Two-platform operation remains a first-release requirement.
 
-## Development status
+## Current implementation
 
-This repository currently contains the initial specification derived from the founding interview on 8 October 2026. Implementation and public release are subsequent work. The open-source license has not yet been selected.
+The repository foundation provides: a minimal importable Python package, governance gates, scoped issue and pull-request workflows, a documentation build, dependency locks, and release tooling. It does not connect to advertising accounts, collect conversion events, or spend money.
+
+[SETUP.md](SETUP.md) records the GitHub activation procedure and the account prerequisites still outstanding. The checked-in protection policy requires independent review and passing checks. At initial adoption, GitHub refuses private-repository branch protection under the current account plan, both setup secrets are absent, and the write-access invitation for appointed independent reviewer `bit-mis` awaits acceptance. Committed policy is not evidence that server-side enforcement is active.
+
+CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
+
+## Local development
+
+The canonical working directory is `~/dev/Adslop`.
+
+Use Python 3.12 and the checked-in dependency locks:
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python --require-hashes -r requirements/ci/dev-env.txt
+uv pip install --python .venv/bin/python --require-hashes -r requirements/ci/runtime-env.txt
+uv pip install --python .venv/bin/python --require-hashes -r requirements/ci/build-tools.txt
+uv pip install --python .venv/bin/python --no-build-isolation --no-deps -e .
+.venv/bin/python -m pytest tests/package governance/tests -q
+.venv/bin/python -m ruff check adslop governance tests
+```
+
+The `adslop` import is only the package baseline. There is no campaign CLI or application server yet.
+
+## Documentation
+
+[The documentation index](docs/README.md) separates the current repository tools from the planned product. The full product contract remains in [SPECIFICATION.md](SPECIFICATION.md).
+
+With Node.js 20 or newer:
+
+```bash
+npm --prefix docs-site ci
+npm --prefix docs-site exec -- playwright install chromium
+npm --prefix docs-site run security:audit
+npm --prefix docs-site run check
+npm --prefix docs-site start
+```
+
+Private GitHub links require authenticated repository access during validation. The documentation setup explains how to supply a narrowly scoped token through the environment.
+
+## Contributing and governance
+
+Read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and [CONTRIBUTING.md](CONTRIBUTING.md) before changing the repository. Humans and agents follow the same issue, commit, verification, and review requirements.
+
+Every delivery PR closes one open slice issue, stays within its declared file scope, uses a matching Conventional Commit title, and advances the version and changelog. The applicable required checks, written laws, and checked-in main ruleset must agree. Enforcement changes retain code-owner review and independent approval of the latest push.
+
+## License
+
+The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
