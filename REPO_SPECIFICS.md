@@ -6,7 +6,7 @@ This is the Adslop appendix to [PR_GUIDELINE.md](PR_GUIDELINE.md). Read [CLAUDE.
 
 - `[repo:Adslop]` [SPECIFICATION.md](SPECIFICATION.md) defines the intended product. Distinguish those requirements from implemented and verified behavior in code, documentation, and reports.
 - `[repo:Adslop]` Build a generic revenue instrument for digital products. Four Pillars/BaZi is the first example, not a fixed funnel, billing model, or product identity.
-- `[repo:Adslop]` The first accepted product release coordinates campaign creation on Google and Meta, conversion tracking, and performance measurement. Preserve each platform's actual targeting and creative semantics.
+- `[repo:Adslop]` The first accepted product release coordinates campaign creation on Google and Meta, conversion tracking, performance measurement, deterministic PnL-based allocation across platforms and creative-serving units, keyword pruning, and campaign reconciliation. Preserve each platform's actual targeting and creative semantics.
 - `[repo:Adslop]` Keywords constrain eligibility against search or text context. Do not silently substitute interest audiences or treat an audience-category search as keyword targeting. Meta conformance remains the specific external dependency recorded in the specification.
 - `[repo:Adslop]` Every substantive human workflow must be available through the supported API with the same validation, evidence, and authority checks for agents.
 - `[repo:Adslop]` Establish dependable execution and measurement before expanding into autonomous campaign strategy, landing-page changes, or application development.
@@ -15,7 +15,8 @@ This is the Adslop appendix to [PR_GUIDELINE.md](PR_GUIDELINE.md). Read [CLAUDE.
 
 - `[repo:Adslop]` Preserve event-sourced state and full accessible provenance. Requested, attempted, acknowledged, and independently observed external actions are different facts.
 - `[repo:Adslop]` Replay reconstructs state or analysis without repeating external writes, conversion uploads, or spend. New side effects require a new authorized execution context.
-- `[repo:Adslop]` Experiments have versioned manifests before exposure, and results remain linked to their design and evidence. Keep attributed performance separate from properly supported incremental effects.
+- `[repo:Adslop]` Experiments have versioned manifests before exposure, and results remain linked to their design and evidence. Keep attributed performance separate from properly supported incremental effects. Allocation and pruning remain within a declared adaptive policy; fixed comparisons are protected.
+- `[repo:Adslop]` Reconcile configuration, execution, spend, outcomes, and financial records before consequential allocation. Do not turn unknown data into zero, double-count reservations and accrued cost, or release capacity on an unconfirmed budget reduction.
 - `[repo:Adslop]` Releases and analyses must identify their exact versions and inputs. Record unavailable evidence or reproduction limits rather than inventing observations.
 - `[repo:Adslop]` Credentials, advertising-account tokens, personal customer records, and operational secrets must remain outside source control and ordinary audit payloads.
 

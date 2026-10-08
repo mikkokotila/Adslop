@@ -73,6 +73,13 @@
       "sidebarLabel": "Documentation profile"
     },
     {
+      "source": "docs/Reference/Revenue-Engine-Research.md",
+      "dest": "reference/revenue-engine-research.md",
+      "slug": "/reference/revenue-engine-research",
+      "sidebarPosition": 2,
+      "sidebarLabel": "Revenue engine research"
+    },
+    {
       "source": "docs/Developer/README.md",
       "dest": "developer/home.md",
       "slug": "/developer/home",
