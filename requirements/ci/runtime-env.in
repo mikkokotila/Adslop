@@ -1,0 +1,5 @@
+# Runtime-env set: mirrors [project.dependencies] in pyproject.toml.
+# The editable install runs with --no-deps, so the declared runtime
+# dependencies install only through this compiled set; a derived
+# repository that adds a runtime dependency adds it here and recompiles.
+# The template itself declares none, so the compiled set is empty.

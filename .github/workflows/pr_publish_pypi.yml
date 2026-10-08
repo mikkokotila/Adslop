@@ -1,0 +1,140 @@
+name: Publish Package to PyPI
+
+# Publishes a released tag to PyPI with verifiable provenance.
+#
+# Disabled unless the repository variable PYPI_PUBLISH_ENABLED is 'true'. The
+# template itself has no PyPI project and must never attempt an upload; a
+# derived repository sets the variable once it has configured trusted
+# publishing. A publish path that fires by default is a publish path that
+# fires by accident.
+#
+# The filename guard is the important control: PyPI permanently rejects any
+# filename it has ever accepted, even after the file is deleted, and deleted
+# releases vanish from its JSON API. A reused version therefore fails in the
+# least visible way possible, so the guard runs BEFORE anything is built.
+
+on:
+  # `release: published` alone would never fire here: the release is created by
+  # scripts/create_release.py running under GITHUB_TOKEN, and GitHub does not
+  # start workflow runs for events raised by that token. workflow_run on the
+  # release workflow is the trigger that actually reaches this job.
+  workflow_run:
+    workflows: ['Automated Release']
+    types: [completed]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_distribution:
+    name: build_distribution
+    if: >-
+      ${{ vars.PYPI_PUBLISH_ENABLED == 'true' &&
+          (github.event_name != 'workflow_run' ||
+           github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout the released tag
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          # workflow_run carries no tag, so resolve it from the released
+          # commit; a release event carries it directly.
+          ref: ${{ github.event.release.tag_name || github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --require-hashes -r requirements/ci/build-tools.txt
+          python -m pip install --require-hashes -r requirements/ci/packaging-tools.txt
+          python -m pip install --require-hashes -r requirements/ci/gate-tools.txt
+
+      - name: Guard against a burned filename
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import sys
+          import tomllib
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          project = tomllib.loads(Path('pyproject.toml').read_text())['project']
+          name, version = project['name'], project['version']
+          url = f'https://pypi.org/pypi/{name}/json'
+          try:
+              with urllib.request.urlopen(url, timeout=30) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print(f'{name} is not yet on PyPI; nothing can be burned')
+                  sys.exit(0)
+              raise
+          burned = sorted(payload.get('releases', {}))
+          if version in burned:
+              files = [f['filename'] for f in payload['releases'][version]]
+              print(f'::error::version {version} is burned on PyPI: {files}')
+              print('PyPI permanently rejects a filename it has accepted. Bump past it.')
+              sys.exit(1)
+          print(f'{name} {version} is available ({len(burned)} released versions)')
+          PY
+
+      - name: Build the distributions
+        env:
+          SOURCE_DATE_EPOCH: '1704067200'
+        run: python -m build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
+        with:
+          subject-path: dist/*
+
+      - name: Record artifact digests
+        run: |
+          set -euo pipefail
+          {
+            echo '### Artifact SHA-256'
+            echo
+            echo '```'
+            (cd dist && sha256sum ./*)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pypi-distributions
+          path: dist
+
+  publish_to_pypi:
+    name: publish_to_pypi
+    needs: build_distribution
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53  # v6.0.0
+        with:
+          name: pypi-distributions
+          path: dist
+
+      - name: Publish via trusted publishing
+        # OIDC only: no long-lived token exists to leak.
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0

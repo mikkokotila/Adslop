@@ -1,0 +1,207 @@
+name: Bootstrap Repository
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: Optional Python import package name. Defaults to repository slug converted to snake_case.
+        required: false
+        type: string
+
+# Serialize every bootstrap run into a single lane. Unlike the pr_checks
+# workflows (which cancel superseded runs because only the latest PR push
+# matters), an in-progress bootstrap is never cancelled: it may be partway
+# through the rename-and-merge that specializes the repo, and interrupting it
+# would leave a half-applied state. A run queued behind it finds the repo
+# already specialized and no-ops. This stops the repo-creation push and the
+# workflow_dispatch trigger from racing into two parallel rename PRs.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  bootstrap:
+    name: Bootstrap Repository
+    # Nothing to specialize on the template itself: the package is already
+    # named after this repository, so the run reaches the token-bearing step
+    # and fails every push. Skipping keeps a real bootstrap failure visible
+    # instead of hiding it among expected ones. A derived repository's name
+    # differs, so it runs unchanged -- the rename engine exempts
+    # .github/workflows/, so this literal survives specialization intact.
+    if: github.repository != 'mikkokotila/Adslop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install bootstrap dependencies
+        run: python -m pip install --require-hashes -r requirements/ci/gate-tools.txt
+
+      - name: Detect CodeQL availability
+        id: codeql
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          visibility="$(gh api "repos/${{ github.repository }}" --jq '.visibility' 2>/dev/null || echo unknown)"
+          ghas="$(gh api "repos/${{ github.repository }}" --jq '.security_and_analysis.advanced_security.status // "unknown"' 2>/dev/null || echo unknown)"
+          if [ "$visibility" = "public" ] || [ "$ghas" = "enabled" ]; then
+            echo "supported=supported" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=unsupported" >> "$GITHUB_OUTPUT"
+            echo "::warning::CodeQL cannot run here (private repository without GitHub Advanced Security); it will be removed from the laws, the ruleset, and the workflows so the bijection holds."
+          fi
+
+      - name: Rewrite repository-specific files
+        run: |
+          set -euo pipefail
+          args=(--repo-name "${{ github.event.repository.name }}" --owner "${{ github.repository_owner }}" --files-only --codeql "${{ steps.codeql.outputs.supported }}")
+          if [ -n "${{ inputs.package_name }}" ]; then
+            args+=(--package-name "${{ inputs.package_name }}")
+          fi
+          python governance/bootstrap_repository.py "${args[@]}"
+
+      - name: Open and merge bootstrap PR
+        id: bootstrap_pr
+        env:
+          GH_TOKEN: ${{ secrets.REPO_BOOTSTRAP_TOKEN }}
+          BOOTSTRAP_BRANCH: bootstrap/repository-law-${{ github.run_id }}
+          BOOTSTRAP_TITLE: "chore: bootstrap repository law"
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .; then
+            echo "No repository bootstrap file changes."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::REPO_BOOTSTRAP_TOKEN is required so bootstrap can create a PR, trigger PR checks, merge through branch rules, and apply labels/rulesets."
+            exit 1
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: bootstrap repository law"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.git"
+          git push origin "HEAD:${BOOTSTRAP_BRANCH}"
+
+          gh label create slice \
+            --repo "$REPOSITORY" \
+            --color "5319e7" \
+            --description "Mechanically scoped repository slice" \
+            --force
+
+          python - <<'PY' > bootstrap_issue.md
+          from pathlib import Path
+
+          import yaml
+
+          def blockquote(value: str) -> str | None:
+              collected: list[str] = []
+              started = False
+              for line in value.split('\n'):
+                  if not started:
+                      if line.startswith('> **Significance.**'):
+                          collected.append(line)
+                          started = True
+                  elif line.startswith('>'):
+                      collected.append(line)
+                  else:
+                      break
+              return '\n'.join(collected) if collected else None
+
+          template = yaml.safe_load(Path('.github/ISSUE_TEMPLATE/slice.yml').read_text())
+          blocks: list[str] = []
+          for item in template.get('body', []):
+              attrs = item.get('attributes', {}) if isinstance(item, dict) else {}
+              value = attrs.get('value') if isinstance(attrs, dict) else None
+              if isinstance(value, str):
+                  block = blockquote(value)
+                  if block:
+                      blocks.append(block)
+
+          print('\n\n'.join(blocks))
+          print('\n\n## Surfaces\n- `**`\n\n## Out of Scope\n- (none)\n')
+          PY
+
+          issue_number="$(gh issue list \
+            --repo "$REPOSITORY" \
+            --state open \
+            --search "${BOOTSTRAP_TITLE} in:title" \
+            --json number \
+            --jq '.[0].number // empty')"
+          if [ -z "$issue_number" ]; then
+            issue_url="$(gh issue create \
+              --repo "$REPOSITORY" \
+              --title "$BOOTSTRAP_TITLE" \
+              --label slice \
+              --body-file bootstrap_issue.md)"
+            issue_number="${issue_url##*/}"
+          fi
+
+          printf 'Closes #%s\n' "$issue_number" > bootstrap_pr.md
+          pr_url="$(gh pr create \
+            --repo "$REPOSITORY" \
+            --base main \
+            --head "$BOOTSTRAP_BRANCH" \
+            --title "$BOOTSTRAP_TITLE" \
+            --body-file bootstrap_pr.md)"
+          pr_number="${pr_url##*/}"
+          echo "Bootstrap PR: $pr_url"
+
+          sleep 15
+          gh pr checks "$pr_number" --repo "$REPOSITORY" --watch --interval 10
+          gh pr merge "$pr_number" \
+            --repo "$REPOSITORY" \
+            --merge \
+            --delete-branch \
+            --subject "$BOOTSTRAP_TITLE" \
+            --body "Merge automated repository bootstrap."
+
+      - name: Apply labels and protected-main ruleset
+        if: ${{ github.ref == 'refs/heads/main' && (steps.bootstrap_pr.outputs.changed == 'true' || github.event_name == 'workflow_dispatch') }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_BOOTSTRAP_TOKEN }}
+          LABEL_TEMPLATE_REPOSITORY: ${{ vars.LABEL_TEMPLATE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::REPO_BOOTSTRAP_TOKEN is not configured. File bootstrap is complete, but labels and the live protected-main ruleset were not applied."
+            exit 1
+          fi
+          python governance/bootstrap_repository.py \
+            --repo-name "${{ github.event.repository.name }}" \
+            --owner "${{ github.repository_owner }}" \
+            --github-only
+
+      - name: Track CodeQL re-enablement
+        if: ${{ steps.codeql.outputs.supported == 'unsupported' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_BOOTSTRAP_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="ci: re-enable CodeQL when the repository can run it"
+          existing="$(gh issue list --repo "$REPOSITORY" --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$REPOSITORY" --title "$title" --body "CodeQL was removed during bootstrap because this repository cannot run it (private without GitHub Advanced Security). It was dropped from .github/rulesets/main.json, the laws in CLAUDE.md, and .github/workflows/pr_checks_codeql.yml together, so the laws<->ruleset bijection (pr_checks_honesty) still holds. Re-enable once the repository is public or Advanced Security is enabled: restore pr_checks_codeql.yml, add the law and the 'PR Checks CodeQL (python)' required status check back to CLAUDE.md and .github/rulesets/main.json in their own PR, then PUT the updated snapshot to the live ruleset."
+          fi

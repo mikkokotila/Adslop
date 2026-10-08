@@ -1,0 +1,12 @@
+# Enforcement surfaces whose content determines merge verdicts.
+# The declared ruleset requires independent code-owner approval for changes
+# here. Only the authorized maintainer is listed; additional owners require
+# an explicit appointment and write access. See MAINTAINERS.md and SETUP.md.
+# No global * rule: ordinary changes retain the one-approval requirement.
+
+/CLAUDE.md @mikkokotila
+/governance/ @mikkokotila
+/.github/ @mikkokotila
+/governance.yml @mikkokotila
+/pyproject.toml @mikkokotila
+/requirements/ @mikkokotila
