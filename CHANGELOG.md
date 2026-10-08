@@ -2,7 +2,7 @@
 
 - Require deterministic budget allocation, keyword pruning, and campaign reconciliation in the first release.
 - Record verified Meta capabilities and the remaining positive-keyword dependency.
-- Define durable collection and precise Arrow/Polars analytical boundaries.
+- Specify URL-parameter collection, periodic durable ingestion, and precise Arrow/Polars analytical boundaries.
 - Compare implementation stacks and distinguish proposals from selected dependencies.
 
 # v0.1.0
