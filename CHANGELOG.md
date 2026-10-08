@@ -3,6 +3,7 @@
 - Clarify URL-parameter events collected through Bunny access logs at an approximately five-minute cadence.
 - Separate edge acknowledgment, log observation, and durable canonical admission with deduplication and provenance.
 - Accept three-day source retention and define late-entry recovery and coverage gaps.
+- Require durable rejection dispositions and demonstrated canonical-storage recovery objectives.
 
 # v0.1.1
 
