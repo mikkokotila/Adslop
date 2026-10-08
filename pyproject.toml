@@ -37,7 +37,7 @@ dev = [
   "pytest>=8,<10",
   "hypothesis>=6.100,<7",
   "ruff==0.16.1",
-  "pyright==1.1.408",
+  "pyright==1.1.414",
   "vulture>=2.14,<3",
   "coverage[toml]>=7.6,<8",
   "pyyaml>=6.0,<7",
