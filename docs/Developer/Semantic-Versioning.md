@@ -28,10 +28,10 @@ The version gate enforces a minimum from the PR's Conventional Commits type:
 `type!` requires major, `feat` requires minor, everything else at least patch.
 A larger bump than the minimum is always allowed.
 
-**Every PR bumps the version and adds a changelog section**, including
-docs-only PRs. There is no version-neutral change here. The rule is
-deliberately absolute: the alternative is a judgement call on every PR about
-whether it "counts", and that judgement is where changelog trails go missing.
+**Every ordinary PR bumps the version and adds a changelog section**, including
+docs-only PRs. The explicit dependency-bot exemption is defined in
+`governance.yml` and disclosed by [CLAUDE.md](../../CLAUDE.md); it must not be
+expanded through an undocumented exception.
 
 ## Read next
 

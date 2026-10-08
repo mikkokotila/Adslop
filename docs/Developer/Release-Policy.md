@@ -4,6 +4,14 @@ What may publish this package, what a release must carry, and what may never
 happen twice. [Making a Release](Making-Release.md) is the operational
 sequence; this page is the controls that sequence runs under.
 
+## Current status
+
+Adslop is private. PyPI publication is disabled, no public documentation host
+is configured, and the intended live ruleset is blocked by the current GitHub
+plan. The controls below describe the configured release path and its required
+preconditions; they do not claim that protection or publication is active.
+See [SETUP.md](../../SETUP.md) for the outstanding setup work.
+
 ## Prerequisites
 
 - the operational sequence in [Making a Release](Making-Release.md)
@@ -24,8 +32,7 @@ Never reuse a version; always bump past it.
 
 ## Publish-path gates
 
-The publish path is gated as strongly as the merge path, and every control is
-mechanical:
+The following mechanisms must be configured and verified before publication:
 
 | control | mechanism |
 | --- | --- |
@@ -49,7 +56,7 @@ written at release time.
 
 ## Release deliverables
 
-Every release carries:
+A successful enabled PyPI publishing run is configured to produce:
 
 - the wheel and sdist that PyPI serves
 - GitHub build-provenance attestations for both, served by the attestation API
@@ -72,7 +79,8 @@ sha256sum <artifact>
 
 Recovery from a partial release is asymmetric:
 
-- **publish succeeded, assets missing** — re-run the asset step alone
+- **artifact or attestation step failed** — inspect the run and recover only
+  the failed step; do not re-upload an already published distribution
 - **upload failed partway** — the version is burned; bump past it
 
 Never re-run the full workflow for a version PyPI already serves. The filename

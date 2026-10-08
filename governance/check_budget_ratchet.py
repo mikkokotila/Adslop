@@ -60,7 +60,9 @@ def _pr_body_from_number(pr_number: int) -> str:
         print('BUDGET RATCHET GATE -- FAIL', file=sys.stderr)
         print('  GH_TOKEN/GITHUB_TOKEN required for --pr-number mode', file=sys.stderr)
         sys.exit(2)
-    owner_repo = os.environ.get('GITHUB_REPOSITORY', 'mikkokotila/Adslop')
+    owner_repo = os.environ.get('GITHUB_REPOSITORY', '')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', owner_repo):
+        _fail_setup('GITHUB_REPOSITORY must identify OWNER/REPOSITORY in --pr-number mode')
     cmd = ['gh', 'api', f'repos/{owner_repo}/pulls/{pr_number}', '--jq', '.body']
     result = subprocess.run(cmd, check=False, capture_output=True, text=True, env={**os.environ, 'GH_TOKEN': token})
     if result.returncode != 0:

@@ -204,28 +204,17 @@ def test_closeout_guard_skips_withdrawals() -> None:
 
 
 def test_version_gate_has_no_permanent_bypass() -> None:
-    """`pr_checks_version` must actually run the gate on this repository.
+    """Every delivery must invoke version validation against a verified base.
 
-    Its mode probe was `base == "<the template's own name>" and head == repo`,
-    which is permanently true here -- so the workflow printed a warning and
-    exited 0 before `version_gate.py` ever ran. Law 5 was a required check
-    that had never once been evaluated on the repository that declares it.
+    Initial adoption is proved from Git artifacts inside the gate; neither a
+    package rename nor a workflow mode branch can skip version validation.
     """
     root = pathlib.Path(__file__).resolve().parents[2]
     text = (root / '.github/workflows/pr_checks_version.yml').read_text(encoding='utf-8')
-    seed = 'new' '-repository-template'
-    # All three conditions, not just the rename. `base != head` alone hands any
-    # author a one-file bypass: renaming `[project].name` puts the gate into
-    # specialization mode on the same PR. Requiring the base to still be the
-    # template's seed name, and the repository not to be the template, makes
-    # the bypass reachable exactly once -- in a derived repo's bootstrap PR.
-    seed_q = f'"{seed}"'
-    assert f'base == {seed_q}' in text and 'base != head' in text \
-        and f'repo != {seed_q}' in text, (
-        'the specialization probe must require all three conditions; any one '
-        'of them alone is a bypass'
-    )
     assert 'governance/version_gate.py' in text
+    assert '--base-ref' in text
+    assert 'template-specialization' not in text
+    assert 'exit 0' not in text
 
 
 def test_ratchet_gates_have_no_permanent_bootstrap_mode() -> None:

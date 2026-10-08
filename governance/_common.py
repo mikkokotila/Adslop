@@ -370,7 +370,7 @@ def significant_lines(path: Path) -> int:
 def _is_path_excluded(rel: Path, excludes: list[str]) -> bool:
     # Path-part match, not substring: an exclude entry matches only if its
     # parts appear as a contiguous slice of rel's parts, so 'dist' does not
-    # spuriously match 'Adslop/distance.py'.
+    # spuriously match 'adslop/distance.py'.
     parts = rel.parts
     for ex in excludes:
         ex_parts = Path(ex).parts

@@ -265,13 +265,16 @@ def test_bootstrap_review_and_slice_settings_match_config() -> None:
     issue_template = (REPO_ROOT / _str(slice_config, 'issue_template')).read_text(encoding='utf-8')
 
     assert f'timeout-minutes: {_int(bootstrap, "timeout_minutes")}' in bootstrap_workflow
-    assert f'--label {_str(slice_config, "label")}' in bootstrap_workflow
     assert f'labels:\n  - {_str(slice_config, "label")}' in issue_template
     assert _str(slice_config, 'issue_template') in slice_workflow
     assert _str(slice_config, 'issue_template') in slice_issue_workflow
-    assert _str(bootstrap, 'label_template_repository') in bootstrap_script
-    assert _str(variables, 'label_template_repository') in bootstrap_workflow
-    assert _str(variables, 'label_template_repository') in label_workflow
+    labels_manifest = REPO_ROOT / _str(bootstrap, 'labels_manifest')
+    assert labels_manifest.is_file()
+    labels = json.loads(labels_manifest.read_text(encoding='utf-8'))
+    assert _str(slice_config, 'label') in {label['name'] for label in labels}
+    assert 'sync_labels' in bootstrap_script
+    assert 'governance/sync_labels.py' in label_workflow
+    assert 'LABEL_TEMPLATE_REPOSITORY' not in bootstrap_workflow + label_workflow
     assert _str(variables, 'ruleset_id') in setup
     assert _str(secrets, 'bootstrap_token') in bootstrap_workflow
     assert _str(secrets, 'ruleset_audit_token') in setup

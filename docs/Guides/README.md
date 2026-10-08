@@ -1,38 +1,63 @@
-# Documentation site
+# Build and preview the documentation
 
-Build and inspect the documentation scaffold from a repository checkout.
+Build the maintained Adslop documentation from a checkout. This guide does not
+launch the advertising system; that system is still specified rather than
+implemented.
 
 ## Prerequisites
 
-- Node.js 20 or later
-- npm
+- Node.js 20 or later and npm
+- access to this private checkout
+- a non-draft pull request opened before running gates for a change, as
+  required by [CLAUDE.md](../../CLAUDE.md)
+- `GITHUB_TOKEN` in the environment when mapped pages contain absolute links
+  to this private repository; the token needs read access to those resources
 
-## Install and build
+Do not place tokens in the documentation profile or commit them. CI supplies
+its repository token to the documentation-check step. Public external links
+are checked without authentication.
+
+## Install and verify
+
+Run from the repository root after the pull request is open:
 
 ```bash
 npm --prefix docs-site ci
+npm --prefix docs-site exec -- playwright install chromium
 npm --prefix docs-site run security:audit
 npm --prefix docs-site run check
 ```
 
-The check lints maintained Markdown, verifies external links, assembles every mapped source, builds the static site, checks routes and asset budgets, then exercises desktop, mobile, theme, search, edit-link, and accessibility behavior in Chromium.
+The check lints maintained Markdown, runs the documentation unit tests,
+verifies external links, assembles mapped sources, builds the site, checks
+routes and asset budgets, then exercises desktop, mobile, themes, search,
+edit links, and accessibility in Chromium.
 
-## Run locally
+## Preview the built result
 
 ```bash
-npm --prefix docs-site start
+npm --prefix docs-site run serve
 ```
 
-Open the URL printed by Docusaurus. Edit `docs-site/product-docs.json` for product identity and `docs-site/docs-map.json` when adding, moving, or removing a maintained page.
+Open `http://127.0.0.1:3100/`. For live editing, run
+`npm --prefix docs-site start` and use the development URL it prints.
 
 ## Expected result
 
-The build writes derived output under `docs-site/build`. Generated source and test artifacts remain ignored.
+The static build is written to `docs-site/build`. The product specification
+appears under Overview and describes planned behavior. Generated files and
+browser artifacts remain ignored. Building or serving locally does not
+publish the site or change repository visibility.
 
 ## Failure boundary
 
-An unmapped source, missing mapped source, duplicate route, broken local or external link, Markdown violation, build error, route drift, asset-budget breach, accessibility violation, search failure, or responsive overflow fails the check.
+A missing source, duplicate route, broken link, Markdown violation, build
+error, route drift, asset-budget breach, accessibility violation, search
+failure, or responsive overflow fails the check. A missing token, inaccessible
+private resource, unknown authenticated URL shape, or genuine 404 is not a
+successful private-link check.
 
 ## Read next
 
-Use the [documentation profile reference](../Reference/README.md) before adapting the scaffold.
+Use the [documentation profile reference](../Reference/README.md) when adding
+sources or changing preview coordinates.

@@ -82,10 +82,10 @@ test('preserves multi-backtick inline code while transforming surrounding prose'
 
 test('extracts unique Markdown and HTML external links', () => {
   const source = [
-    '[Repository](https://github.com/Adslop/example)',
-    '<a href="https://docs.adslop.fi/example/">Docs</a>',
-    '<img src="https://docs.adslop.fi/example/logo.png" alt="Logo" />',
-    '[Duplicate](https://github.com/Adslop/example)',
+    '[Repository](https://github.com/example/docs-example)',
+    '<a href="https://docs.example.test/example/">Docs</a>',
+    '<img src="https://docs.example.test/example/logo.png" alt="Logo" />',
+    '[Duplicate](https://github.com/example/docs-example)',
     '`[Inline example](http://127.0.0.1/private)`',
     '~~~markdown',
     '[Fenced example](http://169.254.169.254/latest/meta-data)',
@@ -95,9 +95,9 @@ test('extracts unique Markdown and HTML external links', () => {
   assert.deepEqual(
     [...extractExternalLinks(source)].sort(),
     [
-      'https://docs.adslop.fi/example/',
-      'https://docs.adslop.fi/example/logo.png',
-      'https://github.com/Adslop/example',
+      'https://docs.example.test/example/',
+      'https://docs.example.test/example/logo.png',
+      'https://github.com/example/docs-example',
     ]
   );
 });
@@ -226,7 +226,7 @@ test('validates documentation deployment coordinates before generation', () => {
     tagline: 'Product documentation.',
     siteUrl: 'https://docs.example.com',
     basePath: '/product/',
-    sourceRepoUrl: 'https://github.com/Adslop/product',
+    sourceRepoUrl: 'https://github.com/example/product',
   };
 
   assert.doesNotThrow(() => validateProfile(profile));

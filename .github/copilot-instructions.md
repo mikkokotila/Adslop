@@ -8,7 +8,7 @@ Review like a senior engineer, not a linter. Be meticulous, terse, concrete, and
 
 Scan every commit message between the base and `HEAD`, and the PR title and body, for any mention of an AI or LLM assistant: `claude`, `codex`, `chatgpt`, `gpt-<n>`, `copilot`, `cursor`, `gemini`, `anthropic`, `openai`, `llm`, `ai-assistant`, the phrase "generated with", and any `Co-Authored-By:` trailer naming an assistant. A topical reference to a file literally named `copilot-instructions.md`, or to the repository's required "Copilot review", is not attribution.
 
-Any hit is a blocking failure. Stop and report only that. The author must rewrite history to strip the mention(s) before the PR can move forward. PRs in this org never carry AI attribution — this is non-negotiable, and the `pr_checks_cc` gate enforces it server-side, so an unstripped mention will block the merge regardless.
+Any hit is a blocking failure. Stop and report only that. The author must rewrite history to strip the mention(s) before the PR can move forward. PRs in this repository never carry AI attribution — this is non-negotiable, and the `pr_checks_cc` gate enforces it server-side, so an unstripped mention will block the merge regardless.
 
 ## 1. Read before you judge
 
@@ -63,7 +63,7 @@ On GitHub, map the verdict to the review event:
 - **mediocre → Comment.**
 - **ok → Approve.**
 
-`Approve` is the verdict you reach, not the act that merges: the ruleset accepts only `zero-bang`'s approval to unlock merge. If you are not `zero-bang`, record an `ok` verdict as a Comment that says you would approve.
+`Approve` records an eligible reviewer's verdict; it does not merge the PR. A required approval must satisfy the live ruleset's access, authorship, latest-push, and code-owner requirements. `mikkokotila` is the project authority, but an empty `required_reviewers` list does not restrict every eligible approval to that identity. If you are the author, the latest pusher, or otherwise ineligible to provide the required approval, record an `ok` verdict as a Comment that says you would approve. Missing independent review remains a blocker. Consult `MAINTAINERS.md` and `SETUP.md` before claiming protected merge readiness.
 
 ## 6. How to write a finding
 
@@ -88,4 +88,4 @@ Vague, unusable findings — do not write these: "error handling is weak" (where
 
 ## 8. Re-review
 
-When the author says they addressed your feedback, check only whether your previous comments were resolved — do not hunt for new issues on a re-review. If every prior comment is resolved, approve. Otherwise, reply on the unresolved threads stating what is still wrong, and request changes.
+When the author says they addressed your feedback, check whether your previous comments were resolved. If every prior comment is resolved and the required checks support that verdict, submit an approval when eligible, or the `ok` Comment described above when ineligible. Otherwise, reply on the unresolved threads stating what is still wrong and request changes. New changes creating new risk must still be examined.

@@ -1,22 +1,38 @@
-# Documentation hub
+# Adslop documentation
 
-This hub routes readers through the product documentation. Replace the starter text as the product becomes concrete; keep the five-section architecture and the source-backed contracts.
+Adslop is being developed to manage revenue campaigns for digital products.
+The repository currently contains the product specification, a Python package
+baseline, and the development and documentation tooling. It does not yet
+create campaigns, collect conversions, or operate a revenue optimization loop.
 
 ## Start by task
 
-- Use [Guides](Guides/README.md) for ordered jobs with observable results.
-- Use [Reference](Reference/README.md) for interfaces, schemas, defaults, and edge cases.
-- Use [Developer](Developer/README.md) for contribution, release, and maintenance work.
-- Use [Packages](../Adslop/README.md) for module ownership and public entry points.
+- Read the [product specification](../SPECIFICATION.md) for planned behavior
+  and acceptance requirements, including the unresolved Meta capability.
+- Use [Guides](Guides/README.md) to build and preview these documents locally.
+- Use [Reference](Reference/README.md) for the documentation configuration.
+- Use [Developer](Developer/README.md) for contribution and verification.
+- Use [Packages](../adslop/README.md) for the current Python package boundary.
 
-## Product sequence
+## Current workflow
 
-State the product-specific sequence here after the first real workflow exists. Each step must name an implemented boundary, not a planned capability.
+Start with the root [README](../README.md) and the specification. Follow the
+local documentation guide to render the maintained sources, then inspect the
+result in a browser. That rendered documentation is the current observable
+output; an advertising workflow is not yet implemented.
 
-## Product boundary
+The specification describes intended product behavior, not a callable API or
+evidence that platform integrations work. Product examples and API references
+will be added with their implementations.
 
-The root [README](../README.md) owns what the product is, what it excludes, and the smallest first success. This hub owns navigation and the cross-page narrative.
+## Access and publication
+
+The repository is private. Open-source development is intended, but the docs
+have no production hosting configuration. The configured site origin is a
+local preview address. Current repository enforcement prerequisites and
+blockers are recorded in [SETUP.md](../SETUP.md).
 
 ## Read next
 
-Start with the [documentation-site guide](Guides/README.md) when adopting this scaffold.
+Build the [documentation site](Guides/README.md), or read the
+[development workflow](Developer/README.md).

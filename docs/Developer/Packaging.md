@@ -1,12 +1,14 @@
 # Packaging
 
-The packaging contract: what the distributions contain, what they must never
+The package currently contains only its baseline metadata. This is the
+packaging contract: what the distributions contain, what they must never
 contain, and what `pr_checks_packaging` proves about them.
 
 ## Prerequisites
 
 - a clean checkout
-- `python -m pip install -e ".[dev]"`
+- dependencies installed from the hash-locked `requirements/ci/*.txt` sets
+- the checkout installed with `python -m pip install --no-build-isolation --no-deps -e .`
 - `python -m pip install --require-hashes -r requirements/ci/packaging-tools.txt`
 
 ## Artifact policy

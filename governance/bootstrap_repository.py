@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure a repository created from the law template."""
+"""Specialize repository files or apply reviewed GitHub configuration."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib.parse
 from pathlib import Path
 from typing import Final
 
@@ -32,7 +31,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SCRIPT: Final[Path] = Path(__file__).resolve()
 RULESET_PATH: Final[Path] = REPO_ROOT / '.github' / 'rulesets' / 'main.json'
-TEMPLATE_LABEL_REPOSITORY: Final[str] = 'mikkokotila/Adslop'
 
 TEXT_SUFFIXES: Final[frozenset[str]] = frozenset({
     '',
@@ -183,9 +181,16 @@ def _replace_identity_tokens(
     changed = 0
     display_name = repo_slug.replace('-', ' ').replace('_', ' ').title()
     description = 'Python package with repository law built in.'
-    dashed_seeds = {pkg.replace('_', '-') for pkg in old_packages}
-    label_template_sentinel = '__REPOSITORY_LAW_LABEL_TEMPLATE__'
-    owner_name = owner or 'Adslop'
+    replacements = {name: package_name for name in old_packages if name != package_name}
+    for old_package in old_packages:
+        old_slug = old_package.replace('_', '-')
+        if old_slug not in old_packages and old_slug != repo_slug:
+            replacements[old_slug] = repo_slug
+    pattern = re.compile(
+        r'(?<![A-Za-z0-9_])('
+        + '|'.join(re.escape(name) for name in sorted(replacements, key=len, reverse=True))
+        + r')(?![A-Za-z0-9_])'
+    ) if replacements else None
 
     for path in _iter_text_files():
         text = _read_text(path)
@@ -194,22 +199,13 @@ def _replace_identity_tokens(
         rel_path = path.relative_to(REPO_ROOT).as_posix()
         if rel_path.startswith('.github/workflows/'):
             continue
-        # References to the template's own slug -- provenance in README, the
-        # SETUP runbook, the bootstrap label source -- must survive
-        # specialization unchanged, in every file, not just this script.
-        updated = text.replace('mikkokotila/Adslop', label_template_sentinel)
-        for old_package in sorted(old_packages, key=len, reverse=True):
-            if old_package != package_name:
-                updated = updated.replace(old_package, package_name)
-        for old_slug in sorted(dashed_seeds, key=len, reverse=True):
-            if old_slug != repo_slug:
-                updated = updated.replace(old_slug, repo_slug)
+        # One pass preserves replacement outputs: an import package such as
+        # adslop must never be rewritten again into the display slug Adslop.
+        updated = pattern.sub(lambda match: replacements[match.group()], text) if pattern else text
         updated = updated.replace('{REPOSITORY_NAME}', repo_slug)
-        updated = updated.replace('{REPOSITORY_OWNER}', owner_name)
+        updated = updated.replace('{REPOSITORY_OWNER}', owner or '')
         updated = updated.replace('{ONE_SENTENCE_DESCRIPTION}', description)
         updated = updated.replace('{DISPLAY_NAME}', display_name)
-        updated = updated.replace(f'Adslop/{package_name}', f'{owner_name}/{repo_slug}')
-        updated = updated.replace(label_template_sentinel, 'mikkokotila/Adslop')
         if _write_text_if_changed(path, updated):
             changed += 1
     return changed
@@ -537,15 +533,10 @@ def _apply_file_bootstrap(
     owner: str | None,
     codeql: str = 'supported',
 ) -> None:
-    # Idempotency. The bootstrap workflow triggers on every push to main,
-    # but the rename + budget rewrite must run exactly once: once the seed
-    # package is gone the repository is already specialized, and re-deriving
-    # the module budgets would revert the values later slices have tuned,
-    # opening a spurious bootstrap PR on every merge. Skip that work when
-    # already specialized -- but still reconcile CodeQL, which is itself
-    # idempotent and must be able to run if the repository lost CodeQL
-    # support (e.g. went private without Advanced Security) after the
-    # initial bootstrap.
+    # The file-only CLI may be used again in a maintenance PR. Once the seed
+    # package is gone, preserve the adopted identity and calibrated budgets.
+    # Explicit CodeQL removal remains a reviewable file change; the live
+    # configuration workflow never invokes this operation.
     changed = 0
     if any((REPO_ROOT / seed).is_dir() for seed in KNOWN_SEED_PACKAGES):
         pyproject = _load_pyproject()
@@ -628,49 +619,15 @@ def _apply_ruleset(repo: str) -> int:
     return ruleset_id
 
 
-def _copy_labels(repo: str, template_repo: str) -> None:
-    existing = _run_gh(['api', '--paginate', f'repos/{repo}/labels', '--jq', '.[].name'])
-    for label in existing.splitlines():
-        if not label:
-            continue
-        encoded_label = urllib.parse.quote(label, safe='')
-        _run_gh(['api', '-X', 'DELETE', f'repos/{repo}/labels/{encoded_label}'])
-
-    labels_raw = _run_gh(['api', '--paginate', f'repos/{template_repo}/labels'])
-    labels = json.loads(labels_raw)
-    if not isinstance(labels, list):
-        raise SystemExit('bootstrap: expected list from label template repository')
-    for label in labels:
-        if not isinstance(label, dict):
-            continue
-        name = str(label.get('name', ''))
-        color = str(label.get('color', ''))
-        description = str(label.get('description') or '')
-        if not name or not color:
-            continue
-        _run_gh([
-            'api',
-            '-X',
-            'POST',
-            f'repos/{repo}/labels',
-            '-f',
-            f'name={name}',
-            '-f',
-            f'color={color}',
-            '-f',
-            f'description={description}',
-        ])
-    print(f'bootstrap: copied labels from {template_repo}')
-
-
 def _apply_github_bootstrap(repo_slug: str, owner: str | None) -> None:
     if not (os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')):
         raise SystemExit(
             'bootstrap: GH_TOKEN or GITHUB_TOKEN is required for --github-only'
         )
     repo = _repo_full_name(owner, repo_slug)
-    label_template = os.environ.get('LABEL_TEMPLATE_REPOSITORY') or TEMPLATE_LABEL_REPOSITORY
-    _copy_labels(repo, label_template)
+    from sync_labels import sync_labels
+
+    sync_labels(repo)
     _apply_ruleset(repo)
 
 

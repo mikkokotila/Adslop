@@ -115,7 +115,7 @@ def test_seed_identity_is_confined_to_product_configuration() -> None:
     assert all(
         literal not in path.read_text(encoding='utf-8')
         for path in files
-        for literal in ('Adslop', 'Adslop')
+        for literal in ('new' + '_repository_template', 'new' + '-repository-template')
     )
 
 

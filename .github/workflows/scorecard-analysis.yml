@@ -18,8 +18,12 @@ jobs:
     permissions:
       # Needed for Code scanning upload
       security-events: write
-      # Needed for GitHub OIDC token if publish_results is true
-      id-token: write
+      contents: read
+      actions: read
+      checks: read
+      issues: read
+      pull-requests: read
+      statuses: read
 
     steps:
       - name: Checkout code
@@ -32,12 +36,8 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
-          # Scorecard team runs a weekly scan of public GitHub repos,
-          # see https://github.com/ossf/scorecard#public-data.
-          # Setting `publish_results: true` helps us scale by leveraging your workflow to
-          # extract the results instead of relying on our own infrastructure to run scans.
-          # And it's free for you!
-          publish_results: true
+          # Keep repository analysis within this repository.
+          publish_results: false
 
       # Upload the results as artifacts (optional). Commenting out will disable
       # uploads of run results in SARIF format to the repository Actions tab.
@@ -48,8 +48,22 @@ jobs:
           path: results.sarif
           retention-days: 5
 
-      # Upload the results to GitHub's code scanning dashboard (optional).
+      - name: Check code-scanning upload availability
+        id: sarif
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          metadata="$(gh api "repos/${REPOSITORY}")"
+          enabled="$(jq -r '.visibility == "public" or .security_and_analysis.advanced_security.status == "enabled" or .security_and_analysis.code_security.status == "enabled"' <<< "$metadata")"
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != "true" ]; then
+            echo "Code-scanning entitlement is not established; retain the private Actions artifact without a SARIF upload."
+          fi
+
       - name: Upload to code-scanning
+        if: steps.sarif.outputs.enabled == 'true'
         uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4.34.1
         with:
           sarif_file: results.sarif

@@ -7,11 +7,16 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {resolveRepositoryFile} from './repository-paths.mjs';
+import {repositoryLinkStatus, repositoryRequest} from './repository-links.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..', '..');
 const docsMap = JSON.parse(
   await fs.readFile(path.resolve(repoRoot, 'docs-site', 'docs-map.json'), 'utf8')
+);
+
+const productDocs = JSON.parse(
+  await fs.readFile(path.resolve(repoRoot, 'docs-site', 'product-docs.json'), 'utf8')
 );
 
 function stripInlineCode(line) {
@@ -60,6 +65,7 @@ export function extractExternalLinks(text) {
   const patterns = [
     /\[[^\]]*]\((https?:\/\/[^)\s]+)\)/g,
     /(?:href|src)=["'](https?:\/\/[^"']+)["']/g,
+    /^\s{0,3}\[[^\]\n]+\]:\s*<?(https?:\/\/[^\s>]+)>?/gm,
   ];
   for (const pattern of patterns) {
     for (const match of prose.matchAll(pattern)) {
@@ -145,14 +151,14 @@ function pinnedLookup(addresses) {
   };
 }
 
-async function requestOnce(url, method) {
+async function requestOnce(url, method, headers = {}) {
   const {addresses, parsed} = await assertPublicUrl(url);
   const transport = parsed.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
     const outgoing = transport.request(
       parsed,
       {
-        headers: {'user-agent': 'adslop-docs-link-check/1.0'},
+        headers: {'user-agent': 'repository-docs-link-check/1.0', ...headers},
         lookup: pinnedLookup(addresses),
         method,
         signal: AbortSignal.timeout(15000),
@@ -191,10 +197,19 @@ export const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 500;
 
 async function attemptLink(url) {
-  const response = await request(url, 'HEAD');
-  if (response.statusCode === 405) {
+  const repository = repositoryRequest(url, productDocs.sourceRepoUrl, process.env.GITHUB_TOKEN);
+  if (repository) {
+    return repositoryLinkStatus(repository, requestOnce);
+  }
+  return publicLinkStatus(url);
+}
+
+export async function publicLinkStatus(url, send = request) {
+  const response = await send(url, 'HEAD');
+  // Some documentation hosts return an error for HEAD but serve GET normally.
+  if ([403, 404, 405].includes(response.statusCode)) {
     response.resume();
-    const getResponse = await request(url, 'GET');
+    const getResponse = await send(url, 'GET');
     getResponse.resume();
     return getResponse.statusCode;
   }

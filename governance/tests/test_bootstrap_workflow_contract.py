@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP_WORKFLOW = REPO_ROOT / '.github/workflows/bootstrap_repository.yml'
 LINT_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_lint.yml'
@@ -12,27 +14,28 @@ FAIL_LOUD_WORKFLOW = REPO_ROOT / '.github/workflows/pr_checks_fail_loud.yml'
 BOOTSTRAP_SCRIPT = REPO_ROOT / 'governance/bootstrap_repository.py'
 
 
-def test_bootstrap_uses_pr_path_for_protected_main() -> None:
+def test_bootstrap_only_applies_committed_main_configuration() -> None:
     workflow = BOOTSTRAP_WORKFLOW.read_text(encoding='utf-8')
 
     assert 'REPO_BOOTSTRAP_TOKEN is required' in workflow
-    assert 'git push origin "HEAD:${BOOTSTRAP_BRANCH}"' in workflow
-    assert 'gh issue create' in workflow
-    assert 'gh pr create' in workflow
-    assert 'gh pr checks "$pr_number"' in workflow
-    assert 'gh pr merge "$pr_number"' in workflow
-    assert 'git push\n' not in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
+    assert 'ref: main' in workflow
+    assert '--github-only' in workflow
+    assert '--files-only' not in workflow
+    assert '--codeql' not in workflow
+    assert 'gh pr create' not in workflow
+    assert 'gh pr merge' not in workflow
+    assert 'git push' not in workflow
+    assert '--admin' not in workflow
+    assert 'bypass_actors' not in workflow
 
 
-def test_bootstrap_github_only_repair_runs_on_manual_dispatch() -> None:
+def test_bootstrap_reads_target_identity_through_environment() -> None:
     workflow = BOOTSTRAP_WORKFLOW.read_text(encoding='utf-8')
-    repair_condition = (
-        "github.ref == 'refs/heads/main' && "
-        "(steps.bootstrap_pr.outputs.changed == 'true' "
-        "|| github.event_name == 'workflow_dispatch')"
-    )
 
-    assert repair_condition in workflow
+    assert '--repo-name "$REPOSITORY_NAME"' in workflow
+    assert '--owner "$REPOSITORY_OWNER"' in workflow
+    assert 'inputs.package_name' not in workflow
 
 
 def test_bootstrap_job_has_timeout() -> None:
@@ -46,19 +49,9 @@ def test_bootstrap_serializes_concurrent_runs() -> None:
 
     assert 'concurrency:' in workflow
     assert 'group: ${{ github.workflow }}' in workflow
-    # A bootstrap run may be mid rename-and-merge; cancelling it would leave a
-    # half-applied specialization. Queued runs must wait, then no-op. Anything
-    # other than an explicit false would re-open the two-parallel-renames race.
+    # Do not cancel one live label/ruleset reconciliation halfway through.
     assert 'cancel-in-progress: false' in workflow
     assert 'cancel-in-progress: true' not in workflow
-
-
-def test_bootstrap_pr_is_a_valid_slice_shape() -> None:
-    workflow = BOOTSTRAP_WORKFLOW.read_text(encoding='utf-8')
-
-    assert 'gh label create slice' in workflow
-    assert 'print(\'\\n\\n## Surfaces\\n- `**`\\n\\n## Out of Scope\\n- (none)\\n\')' in workflow
-    assert 'printf \'Closes #%s\\n\' "$issue_number" > bootstrap_pr.md' in workflow
 
 
 def test_initial_specialization_uses_bootstrap_modes() -> None:
@@ -75,7 +68,6 @@ def test_initial_specialization_uses_bootstrap_modes() -> None:
     for workflow in (
         RULESET_WORKFLOW,
         TYPING_WORKFLOW,
-        VERSION_WORKFLOW,
         FAIL_LOUD_WORKFLOW,
     ):
         text = workflow.read_text(encoding='utf-8')
@@ -90,10 +82,23 @@ def test_initial_specialization_uses_bootstrap_modes() -> None:
         assert f'repo != "{source_template}"' in text, workflow.name
 
 
+def test_version_workflow_always_validates_committed_artifacts() -> None:
+    workflow = yaml.safe_load(VERSION_WORKFLOW.read_text(encoding='utf-8'))
+    steps = workflow['jobs']['pr_checks_version']['steps']
+    gate_steps = [step for step in steps if 'python governance/version_gate.py' in step.get('run', '')]
+    assert len(gate_steps) == 1
+    step = gate_steps[0]
+    assert 'if' not in step
+    assert step['env']['BASE_SHA'] == '${{ github.event.pull_request.base.sha }}'
+    assert '--base-ref "$BASE_SHA"' in step['run']
+    assert 'exit 0' not in step['run']
+
+
 def test_lint_workflow_has_no_template_package_root() -> None:
     workflow = LINT_WORKFLOW.read_text(encoding='utf-8')
 
-    assert 'Adslop' not in workflow
+    source_package = 'new' + '_repository_' + 'template'
+    assert source_package not in workflow
     assert 'steps.package.outputs.package_root' in workflow
 
 
@@ -117,3 +122,19 @@ def test_bootstrap_rewrite_leaves_workflow_files_static() -> None:
         '_write_workflows',
     ):
         assert f'def {dead_name}' not in script
+
+
+def test_private_scorecard_does_not_publish_and_guards_sarif_upload() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/scorecard-analysis.yml').read_text()
+    assert 'publish_results: false' in workflow
+    assert 'publish_results: true' not in workflow
+    assert 'id-token: write' not in workflow
+    assert "if: steps.sarif.outputs.enabled == 'true'" in workflow
+    assert 'security_and_analysis.code_security.status' in workflow
+
+
+def test_label_workflows_share_the_local_manifest_updater() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/copy-standard-labels.yml').read_text()
+    assert 'python governance/sync_labels.py --repo "$REPOSITORY"' in workflow
+    assert 'LABEL_TEMPLATE_REPOSITORY' not in workflow
+    assert 'DELETE' not in workflow

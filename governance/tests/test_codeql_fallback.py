@@ -108,10 +108,9 @@ def test_disable_codeql_preserves_bijection(tmp_path: Path) -> None:
     assert law_contexts == contexts
 
 
-def test_bootstrap_workflow_detects_codeql_and_passes_flag() -> None:
-    wf = BOOTSTRAP_WORKFLOW.read_text(encoding='utf-8')
-    assert 'Detect CodeQL availability' in wf
-    assert 'security_and_analysis' in wf
-    assert '--codeql' in wf
-    assert 'steps.codeql.outputs.supported' in wf
-    assert 're-enable CodeQL' in wf
+def test_live_bootstrap_cannot_rewrite_codeql() -> None:
+    workflow = BOOTSTRAP_WORKFLOW.read_text(encoding='utf-8')
+    assert '--github-only' in workflow
+    assert '--files-only' not in workflow
+    assert '--codeql' not in workflow
+    assert 'gh pr merge' not in workflow

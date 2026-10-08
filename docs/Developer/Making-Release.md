@@ -3,6 +3,12 @@
 The operational sequence. [Release Policy](Release-Policy.md) is the controls
 this runs under; read that first if you are changing anything here.
 
+## Current status
+
+This workflow is supplied as repository tooling. Adslop remains private and
+PyPI publication is disabled. Resolve and verify the prerequisites in
+[SETUP.md](../../SETUP.md) before relying on the release controls.
+
 ## Prerequisites
 
 - a merged PR on `main` that bumped `[project].version` and added the matching
@@ -11,7 +17,8 @@ this runs under; read that first if you are changing anything here.
 
 ## The sequence
 
-There is no manual step. Merging to `main` runs `Automated Release`, which:
+When its workflow is installed and Actions is enabled, a merge to `main`
+triggers `Automated Release`, which:
 
 1. reads `[project].version` from `pyproject.toml`
 2. derives the tag and validates it against `^v\d+\.\d+\.\d+$`
@@ -25,7 +32,7 @@ does nothing unless the repository variable `PYPI_PUBLISH_ENABLED` is `true`.
 
 ## Enabling PyPI publication
 
-A derived repository publishes only after both of these exist:
+Adslop may publish only after explicit authorization and both of these exist:
 
 1. a PyPI project with **trusted publishing** configured for this repository
    and the `pypi` GitHub environment

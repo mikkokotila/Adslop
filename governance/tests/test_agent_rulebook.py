@@ -1,18 +1,8 @@
-"""Pin the universal PR guideline; hold the repo appendix to its shape.
+"""Pin the adopted PR guideline and keep the product appendix scoped.
 
-The universal guideline is identical in every repository, so a byte pin is the
-right instrument: it is the same artifact everywhere and any edit should be a
-deliberate, visible act.
-
-The repo-specific appendix is not. Bootstrap rewrites it -- that is what makes
-it repo-specific -- so byte-pinning it meant the digest test failed in every
-repository created from this template, inside a required check, before the
-bootstrap PR could go green. A file named `REPO_SPECIFICS` that cannot differ
-per repository was never going to hold.
-
-So the appendix is checked for the properties that must survive rewriting: it
-exists, it points at the guideline, and it still carries repo-scoped entries.
-What those entries say is each repository's own business.
+A guideline change requires an intentional digest update in the same reviewed
+change. The appendix is held to its linking and scope contract so product
+requirements can evolve without pretending they are universal rules.
 """
 
 from __future__ import annotations
@@ -24,13 +14,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PR_GUIDELINE = REPO_ROOT / 'PR_GUIDELINE.md'
 REPO_SPECIFICS = REPO_ROOT / 'REPO_SPECIFICS.md'
-EXPECTED_PR_GUIDELINE_SHA256 = 'ecb4e817e148c64e11a20b7fc34b5a0e5a2025abfa5f8c4b6693553681aa0276'
+EXPECTED_PR_GUIDELINE_SHA256 = '14f744bc599027d283540b134a43cf58b07f35f16483dfcf61aa1aa2110a7581'
 
 # Tokens the bootstrap rename engine rewrites. A file carrying any of them
 # cannot also carry a byte pin.
 #
 # Assembled rather than written as literals: this file is itself inside the
-# rewrite sweep, so a literal `Adslop` here becomes the
+# rewrite sweep, so a literal seed package here becomes the
 # derived repository's own package name and the check silently stops looking
 # for the thing it was written to find. The seed names come from the bootstrap
 # module, which is the one file the sweep skips.
@@ -42,7 +32,7 @@ REWRITTEN_TOKENS = tuple(sorted(_SEEDS)) + tuple(
 
 
 def test_adslop_pr_guideline_is_posted_unchanged() -> None:
-    """Verify the universal PR guideline exists with the canonical digest."""
+    """Verify the adopted PR guideline matches its reviewed digest."""
     assert PR_GUIDELINE.is_file()
     assert sha256(PR_GUIDELINE.read_bytes()).hexdigest() == EXPECTED_PR_GUIDELINE_SHA256
 

@@ -1,9 +1,9 @@
-# Adslop PR Guideline
+# Adslop PR guideline
 
-Status: canonical universal PR guideline for Adslop agent work.
-Scope: rules that apply across Adslop repositories unless a local repository entrypoint narrows them.
-Source basis: consolidated markdown instructions from Adslop repositories scanned for agent-facing rules.
-Specifics: repository-only details live in [REPO_SPECIFICS.md](REPO_SPECIFICS.md).
+Status: adopted, integrity-pinned contributor rules for `mikkokotila/Adslop`.
+Authority: [CLAUDE.md](CLAUDE.md) is the repository constitution; the configured gates enforce its mechanical laws. These tagged rules do not create a competing authority.
+Scope: contribution and review in this repository.
+Specifics: product and operating boundaries live in [REPO_SPECIFICS.md](REPO_SPECIFICS.md).
 
 ## Rubric
 
@@ -55,7 +55,7 @@ Specifics: repository-only details live in [REPO_SPECIFICS.md](REPO_SPECIFICS.md
 - `[github:pr-title]` If the repository binds PR title to issue title, make them byte-equal.
 - `[github:pr-body]` The PR body must identify what changed, why it changed, user or developer impact, and validation.
 - `[github:early-pr]` Open the PR as soon as the change is ready for CI when the repository requires early PR flow; continue local verification while CI runs.
-- `[github:review-request]` Request the repository's required reviewer or approving authority when the PR opens and after requested changes are addressed.
+- `[github:review-request]` Request an authorized, eligible independent reviewer when the PR opens and after requested changes are addressed. Report missing eligibility; do not substitute self-approval or appoint an unrelated reviewer.
 - `[github:review-threads]` All review threads must be answered and resolved before merge.
 - `[github:copilot-review]` If the ruleset requires automated code review, the PR must have that review completed.
 - `[github:ci]` Read failing check output and fix the named cause. If a gate is wrong, fix the gate in a separate PR.
@@ -96,10 +96,10 @@ Specifics: repository-only details live in [REPO_SPECIFICS.md](REPO_SPECIFICS.md
 
 - `[docs:source]` Repository markdown is the canonical source for documentation unless the repo declares another source of truth.
 - `[docs:single-source]` Author a rule, explanation, or procedure once; link to the canonical page instead of copying it.
-- `[docs:current-truth]` Document current runnable behavior, not aspirational behavior.
+- `[docs:current-truth]` Document current runnable behavior. Clearly labelled product requirements may describe intent; they must not be presented as implementation evidence.
 - `[docs:examples]` Examples must be real, runnable, and consistent with implementation.
 - `[docs:changelog]` If the repository requires release notes, update `CHANGELOG.md` with an imperative, specific, non-placeholder entry.
-- `[docs:version]` If the repository requires versioning, bump SemVer strictly forward according to the change type.
+- `[docs:version]` Follow the repository's version gate: advance an existing SemVer strictly forward according to the change type. An initial version requires the gate's committed evidence that both version artifacts are newly introduced, with a valid version and matching changelog.
 - `[docs:release]` Release notes must be accurate, published in the required format, and not left as drafts.
 
 ### Review

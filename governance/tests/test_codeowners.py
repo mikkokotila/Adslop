@@ -29,7 +29,7 @@ ENFORCEMENT_PATHS = frozenset({
     '/pyproject.toml',
     '/requirements/',
 })
-EXPECTED_OWNERS = frozenset({'@mikkokotila', '@pdey', '@bit-mis', '@zero-bang'})
+EXPECTED_OWNERS = frozenset({'@mikkokotila'})
 
 
 def _rule_lines() -> list[list[str]]:

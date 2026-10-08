@@ -162,7 +162,7 @@ _NON_PYTHON_READERS = {
     'runtime.python_version',
     'review.approving_authority',
     'slice.label', 'slice.issue_template',
-    'bootstrap.timeout_minutes', 'bootstrap.label_template_repository',
+    'bootstrap.timeout_minutes',
     'bootstrap.secrets', 'bootstrap.variables',
     'ruleset.name',
 }

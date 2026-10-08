@@ -36,7 +36,7 @@ npm --prefix docs-site run check
 
 These commands complement the workflow checks; they do not replace the ratchets, coverage checks, vulnerability checks, or live-ruleset comparison that CI performs. Read the failing workflow output and fix its stated cause.
 
-Every ordinary PR increases `[project].version` and adds an imperative `CHANGELOG.md` entry under the matching new version header. Documentation-only changes are included. Only the dependency-bot exemptions explicitly configured in `governance.yml` may skip the slice and version gates.
+Every ordinary PR increases `[project].version` and adds an imperative `CHANGELOG.md` entry under the matching new version header. Documentation-only changes are included. For an initial adoption, the version gate verifies that both artifacts are absent on the committed ancestor PR base and that the PR adds both; it then validates the initial canonical numeric version and substantive matching changelog. A partial baseline is an error. This introduction path runs the gate and does not manufacture a historical version. Only the dependency-bot exemptions explicitly configured in `governance.yml` may skip the slice and version gates.
 
 ## Merge and review
 

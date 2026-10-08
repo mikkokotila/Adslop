@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Coverage floor gate: actual coverage must clear a ratcheting floor.
 
-Two rules over `Adslop/`, read from `coverage.json`:
+Two rules over `adslop/`, read from `coverage.json`:
 
   FLOOR  actual line/branch coverage >= the floor in
          `.github/budgets.json`. The Limen-style absolute gate.

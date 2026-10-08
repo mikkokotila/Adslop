@@ -45,6 +45,8 @@ jobs:
         run: npm --prefix docs-site run security:audit
 
       - name: Check documentation site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm --prefix docs-site run check
 
       - name: Set up lint venv

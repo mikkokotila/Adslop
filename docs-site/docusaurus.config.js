@@ -105,7 +105,6 @@ const config = {
             title: 'Product',
             items: [
               {label: 'Repository', href: productDocs.sourceRepoUrl},
-              {label: 'Adslop', href: 'https://github.com/Adslop'},
             ],
           },
         ],

@@ -40,11 +40,9 @@ Use the secret names declared in `governance.yml`. Enter credentials through Git
 
 ### `REPO_BOOTSTRAP_TOKEN`
 
-The explicit activation workflow uses this credential for its authorized repository operations, including label upserts, ruleset administration, and recording `RULESET_ID`. Bootstrap code that creates or updates a branch or PR also needs its applicable content, issue, PR, and workflow permissions.
+The explicit activation workflow uses this credential to reconcile the committed label manifest, apply the protected-main ruleset, and record `RULESET_ID`. Use a Personal Access Token or suitable GitHub App token with access to `mikkokotila/Adslop`, owned by an authorized repository administrator. The built-in `GITHUB_TOKEN` cannot administer repository rulesets.
 
-Use a Personal Access Token or suitable GitHub App token with access to `mikkokotila/Adslop`, owned by an authorized repository administrator. The built-in `GITHUB_TOKEN` cannot administer repository rulesets; PRs created with it also do not trigger the other workflow runs needed by the bootstrap path.
-
-The complete bootstrap permission set is Contents read/write, Pull requests read/write, Issues read/write, Administration read/write, Variables read/write, Workflows read/write, and Metadata read. For a classic PAT, the corresponding documented scopes are `repo` and `workflow`. Do not grant access to an external label-source repository: label definitions are checked in locally.
+The runtime needs Issues write for labels, Administration write for rulesets, Variables write for `RULESET_ID`, and Metadata read. The workflow's checkout uses the built-in token with Contents read. Bootstrap does not create branches, issues, pull requests, or workflow changes, so its administration token does not need those additional write permissions. For a classic PAT, `repo` is the broader corresponding scope; a fine-grained credential permits the narrower repository-specific access. No external label-source access is required.
 
 ```bash
 gh secret set REPO_BOOTSTRAP_TOKEN --repo mikkokotila/Adslop
@@ -72,7 +70,9 @@ The adoption PR establishes the specialized package, documentation, and governan
 gh workflow run bootstrap_repository.yml --repo mikkokotila/Adslop --ref main
 ```
 
-`bootstrap_repository.yml` is invoked through `workflow_dispatch`; ordinary pushes to `main` do not rerun seed-package specialization. The adopted repository must not have its README, specification, version, or measured budgets reset by a later merge.
+`bootstrap_repository.yml` is invoked through `workflow_dispatch` on `main` and checks out `main` explicitly. It runs only the GitHub configuration operation against the committed manifest and ruleset. It does not rewrite files, create a maintenance PR, or merge changes. Ordinary pushes to `main` do not run bootstrap.
+
+Any file changes, including package identity or CodeQL changes, belong in a separate scoped slice and PR with the normal version, check, and review requirements. The local `--files-only` bootstrap command produces reviewable file changes; repeating it on an already adopted repository preserves its README, specification, version, and calibrated budgets.
 
 Label definitions live in `.github/labels.json`. The label operation creates or updates those definitions without deleting unrelated labels or their issue associations. No external label-source variable is required. The separate `copy-standard-labels.yml` maintenance workflow applies the same local definitions when labels need reconciliation.
 
@@ -126,10 +126,13 @@ Do not make the repository public as an implicit remedy for unavailable private-
 | --- | --- |
 | Ruleset API returns HTTP 403 | Resolve plan capability or administrator permission; leave activation explicitly blocked |
 | `REPO_BOOTSTRAP_TOKEN` is missing | Configure the authorized repository secret, then rerun explicit activation |
-| A bootstrap-created PR receives no checks | Check that the credential is a PAT or suitable App token with the needed workflow permissions |
 | `RULESET_ID` is absent after activation | Inspect ruleset-creation and variable-write errors; verify the actual returned ruleset identity |
 | The privileged audit cannot read `bypass_actors` | Correct the audit credential's Administration read access |
 | A required human or code-owner review is unavailable | Obtain an authorized eligible reviewer; do not self-approve or bypass the requirement |
 | Copilot review does not run | Resolve account/repository availability and the automatic-review configuration |
 | A label definition is invalid | Correct the checked-in label contract; do not delete live labels to mask the failure |
 
+
+## Activation tracking
+
+Live protection and reviewer prerequisites are tracked in [issue #3](https://github.com/mikkokotila/Adslop/issues/3). The documented CodeQL fallback is tracked in [issue #4](https://github.com/mikkokotila/Adslop/issues/4). These issues remain open until their activation evidence exists.

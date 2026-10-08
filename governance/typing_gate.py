@@ -296,7 +296,7 @@ REQUIRED_PYRIGHT: Final[dict[str, object]] = {
 # The `include` list pyright must analyze. Shrinking this to an empty
 # list or a non-existent path drops filesAnalyzed to zero, trivially
 # passing the error-count ratchet. Gate asserts exact match.
-REQUIRED_PYRIGHT_INCLUDE: Final[list[str]] = ['Adslop']
+REQUIRED_PYRIGHT_INCLUDE: Final[list[str]] = ['adslop']
 
 FORBIDDEN_VALUES: Final[frozenset[object]] = frozenset(
     {'none', 'warning', 'information', 'info', 'false', False}
@@ -796,7 +796,7 @@ def update_budget(pyright_json_path: str | None) -> None:
     else:
         budget = {
             'schema_version': 2,
-            'package_root': 'Adslop',
+            'package_root': 'adslop',
             'excludes': ['__pycache__', 'build', 'dist'],
             'patterns': {k: dict(v) for k, v in DEFAULT_PATTERNS.items()},
             'any_references': {'total': 0},

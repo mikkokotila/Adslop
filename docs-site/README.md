@@ -1,43 +1,25 @@
-# Documentation scaffold
+# Documentation tooling
 
-This directory turns maintained repository Markdown into the production static
-documentation site defined by
-[`Documentation-System.md`](../docs/Developer/Documentation-System.md).
+This directory renders the maintained Markdown sources listed in
+`docs-map.json`. The [documentation system contract](../docs/Developer/Documentation-System.md)
+defines its five-section structure and verification requirements.
 
-## Fresh repository
+The current profile serves a local preview at `http://127.0.0.1:3100/`.
+No production documentation host has been selected. The private repository's
+[specification](../SPECIFICATION.md) is mapped as planned behavior, not a
+reference for an implemented API.
 
-Repository bootstrap fills product name, repository owner, repository name, and
-base-path identity. Then:
+Follow the [build and preview guide](../docs/Guides/README.md) for installation,
+Chromium setup, verification, token handling for private repository links, and
+local serving. Open the change's non-draft pull request before running gates.
 
-1. replace starter prose with source-backed product content
-2. set `siteUrl` and `basePath` in `product-docs.json`
-3. map every maintained source in `docs-map.json`
-4. add repository-specific semantic and deployment tests
-5. run the locked check before preview or publication
+## Source boundaries
 
-```bash
-npm --prefix docs-site ci
-npm --prefix docs-site run security:audit
-npm --prefix docs-site run check
-```
+- `product-docs.json`: identity and preview/deployment coordinates.
+- `docs-map.json`: maintained sources and stable routes.
+- `scripts/`: assembly, validation, link checks, and dependency audits.
+- `tests/`: unit and rendered-browser contracts.
+- `src/css/custom.css`: typography, color, layout, and responsive behavior.
 
-## Existing repository
-
-Copy these surfaces from the template at one pinned commit:
-
-- `.markdownlint.json`
-- `docs-site/`
-- `docs/Developer/Documentation-System.md`
-- one canonical page for each of Overview, Guides, Reference, Developer, and
-  Packages
-
-Replace `product-docs.json` and `docs-map.json`; do not fork shared scripts or
-CSS for product content. Integrate the three commands above into an existing
-required gate. Freeze the current site, build this candidate beside it, and use
-the contract's parity protocol before cutover.
-
-## Authored and generated files
-
-Author profile, map, scripts, tests, configuration, and CSS in this directory.
-Never author or commit `.generated`, `.docusaurus`, `build`, test results, or
-browser reports.
+Keep product claims in maintained source pages. Never author or commit
+`.generated`, `.docusaurus`, `build`, browser traces, or test reports.

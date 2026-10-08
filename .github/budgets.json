@@ -103,7 +103,8 @@
     "governance/ruleset_gate.py": 203,
     "governance/slice_gate.py": 769,
     "governance/typing_gate.py": 766,
-    "governance/version_gate.py": 352
+    "governance/version_gate.py": 352,
+    "governance/sync_labels.py": 127
   },
   "coverage": {
     "line": 50,

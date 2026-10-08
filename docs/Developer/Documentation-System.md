@@ -1,9 +1,8 @@
 # Documentation system contract
 
-This page defines the documentation product proven in
-[Limen](https://github.com/Adslop/Limen) and the portable contract shipped by
-this repository template. Repositories share information architecture,
-composition, rendering, interaction, and proof without inheriting Limen claims.
+This page defines Adslop's documentation structure, rendering behavior, and
+verification requirements. It is a local contract for this repository.
+The current site is a local preview; no production host has been selected.
 
 `MUST`, `SHOULD`, and `MAY` identify required, recommended, and optional parts
 of the contract.
@@ -56,43 +55,24 @@ The scaffold is portable only when:
 - required checks cannot be disabled while claiming the same standard
 - one build path remains after migration and rollback expiry
 
-## Reference evidence
+## Current evidence boundary
 
-Limen established the source model, composition, five-section architecture, and
-Adslop visual language. Its frozen reference profile had:
+The source map identifies maintained pages and routes. Route counts are
+computed from that map rather than inherited from another product.
+The specification is a planned product document; the package and tooling
+pages describe current implementation. A successful static build demonstrates
+the documentation pipeline, not completion of the advertising system.
 
-| Property | Reference value |
-|---|---|
-| Maintained Markdown sources | 69 |
-| Rendered sitemap URLs | 76 |
-| Top-level sections | Overview, Guides, Reference, Developer, Packages |
-| Site generator | Docusaurus 3 |
-| Search | local, build-time index |
-| Theme | Adslop light and dark system |
-| Route authority | one explicit source-to-route map |
-
-These counts are evidence, not universal targets. The template deliberately
-starts with seven maintained pages and 13 public routes: seven pages, five
-generated category indexes, and search.
-
-The extraction also corrects defects discovered during the Limen study:
-
-- IBM Plex fonts are self-hosted instead of relying on a CSP-incompatible
-  external import
-- robots and sitemap agreement is build-verified
-- external links are checked automatically
-- desktop, mobile, light, dark, search, edit-link, overflow, and accessibility
-  behavior are browser-tested
-- generated routes and static asset budgets are verified
-- identity, source inventory, and routes are explicit validated data
-
-Limen remains the behavioral reference. This template is the portable starting
-point.
+The contract retains self-hosted fonts, local search, route and asset
+verification, and desktop, mobile, theme, keyboard, and accessibility checks.
+A production deployment also needs host-specific access controls, headers,
+redirects, and a verified rollback path before it can claim readiness.
 
 ## Source ownership
 
 - [README.md](../../README.md) is the product home and first-success path.
-- [docs/README.md](../README.md) is the public task router.
+- [docs/README.md](../README.md) is the documentation task router.
+- [SPECIFICATION.md](../../SPECIFICATION.md) owns planned product requirements.
 - `docs/Guides` owns end-to-end jobs and operational workflows.
 - `docs/Reference` owns interfaces, schemas, defaults, outputs, and edge cases.
 - `docs/Developer` owns contributor and maintainer guidance.
@@ -309,8 +289,12 @@ Examples satisfy the level they imply:
 - Published routes are stable API.
 - A changed route requires redirect, link migration, sitemap update, and an
   explicit expected difference.
-- External links pass the automated status check; initial and redirected
+- Public external links pass the automated status check; initial and redirected
   destinations must resolve only to public network addresses.
+- Private source-repository links use authenticated checks only for known URL
+  shapes under the configured repository. The token is sent only to GitHub
+  API endpoints for that repository, never to redirects or other hosts.
+  Missing access and genuine HTTP failures remain failures.
 
 ## Assembly and configuration
 
@@ -461,7 +445,7 @@ Acceptance requires:
 
 ### Fresh repository
 
-1. Create the repository from this template and let bootstrap specialize it.
+1. Establish repository identity and the current implementation boundary.
 2. Replace starter prose with source-backed product content.
 3. Set `siteUrl` and `basePath` in `product-docs.json`.
 4. Add every maintained page to `docs-map.json`.
@@ -480,8 +464,8 @@ Acceptance requires:
 6. Build side by side and apply the parity protocol.
 7. Cut over behind a preview, retain rollback, then remove the old build path.
 
-Roll out sequentially. Prove one unlike production repository before adopting
-the scaffold broadly.
+Publication is a separate decision from local adoption. Keep the local preview
+origin until hosting and access controls are selected and verified.
 
 ## Versioning and drift control
 

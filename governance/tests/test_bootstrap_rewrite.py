@@ -1,127 +1,96 @@
-"""The bootstrap file rewrite renames the package but preserves the template slug.
+"""Bootstrap keeps repository identity separate from Python import identity."""
 
-References to the template's own slug (`mikkokotila/Adslop`) -- the
-README provenance link, the SETUP runbook's `--template` command, the label
-source -- must survive specialization unchanged, even though every other
-occurrence of the seed package name is rewritten.
-"""
 from __future__ import annotations
 
 import hashlib
 import importlib
 import json
-import shutil
-import subprocess
-import sys
+import types
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _seed_packages() -> frozenset[str]:
-    # Read the seed names from the bootstrap module rather than a string
-    # literal: the bootstrap rewrites the seed package name everywhere it
-    # appears EXCEPT its own KNOWN_SEED_PACKAGES constant, so a literal here
-    # would be rewritten to the new package name in a specialized repo and
-    # the guard would misfire. The constant is the one rewrite-proof source.
-    # governance/ is on sys.path via governance/tests/conftest.py.
-    return importlib.import_module('bootstrap_repository').KNOWN_SEED_PACKAGES
+def _bootstrap() -> types.ModuleType:
+    return importlib.import_module('bootstrap_repository')
 
 
-# These tests exercise the seed-package rename, which only happens on the
-# template itself. In an already-specialized repository (a bootstrapped repo
-# running its own copy of the suite) there is no seed package to rename, and
-# the idempotency guard makes the rewrite a no-op -- so there is nothing for
-# these tests to assert. Skip them there, exactly as the CodeQL-fallback
-# tests skip once CodeQL has been removed.
-_HAS_SEED = any((REPO_ROOT / seed).is_dir() for seed in _seed_packages())
-_requires_seed = pytest.mark.skipif(
-    not _HAS_SEED,
-    reason='no seed package present; repository already specialized',
-)
-
-_IGNORE = shutil.ignore_patterns(
-    '.git', '.venv', '.venv-lint', '.venv-ruleset', '.venv-ruleset-audit',
-    '__pycache__', '.pytest_cache', '.ruff_cache',
-)
+def _seed_repository(root: Path) -> str:
+    seed = sorted(_bootstrap().KNOWN_SEED_PACKAGES)[0]
+    package = root / seed
+    package.mkdir()
+    (package / '__init__.py').write_text(
+        f'"""Public package surface for {seed.replace("_", "-")}."""\n\n'
+        '__all__: list[str] = []\n', encoding='utf-8',
+    )
+    (root / 'pyproject.toml').write_text(
+        f'[project]\nname = "{seed.replace("_", "-")}"\nversion = "0.1.0"\n'
+        f'[tool.pyright]\ninclude = ["{seed}"]\n', encoding='utf-8',
+    )
+    (root / 'governance.yml').write_text(
+        f'layout:\n  package_root: {seed}\n  coverage_source: {seed}\n',
+        encoding='utf-8',
+    )
+    (root / 'profile.json').write_text(json.dumps({
+        'name': '{' + 'REPOSITORY_NAME}',
+        'source': 'https://github.com/{' + 'REPOSITORY_OWNER}/{' + 'REPOSITORY_NAME}',
+        'package': seed,
+    }), encoding='utf-8')
+    workflow = root / '.github/workflows/example.yml'
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(f'name: {seed}\n', encoding='utf-8')
+    return seed
 
 
 def _tree_hashes(root: Path) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for path in sorted(root.rglob('*')):
-        if path.is_file() and '__pycache__' not in path.parts:
-            out[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return out
-
-
-@_requires_seed
-def test_template_slug_survives_file_bootstrap(tmp_path: Path) -> None:
-    repo = tmp_path / 'repo'
-    shutil.copytree(REPO_ROOT, repo, ignore=_IGNORE)
-    result = subprocess.run(
-        [
-            sys.executable, 'governance/bootstrap_repository.py', '--files-only',
-            '--repo-name', 'my-new-app', '--owner', 'Adslop',
-        ],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr + result.stdout
-
-    # The rewrite actually ran: the seed package is renamed and gone.
-    assert (repo / 'my_new_app').is_dir()
-    assert not (repo / 'Adslop').exists()
-    assert 'Adslop' not in (repo / 'pyproject.toml').read_text(encoding='utf-8')
-
-    # ...but references to the template's own slug are preserved verbatim.
-    readme = (repo / 'README.md').read_text(encoding='utf-8')
-    assert 'https://github.com/mikkokotila/Adslop' in readme
-    setup = (repo / 'SETUP.md').read_text(encoding='utf-8')
-    assert '--template mikkokotila/Adslop' in setup
-    docs_profile = json.loads(
-        (repo / 'docs-site' / 'product-docs.json').read_text(encoding='utf-8')
-    )
-    assert docs_profile == {
-        'productId': 'my-new-app',
-        'productName': 'My New App',
-        'tagline': 'Python package with repository law built in.',
-        'siteUrl': 'https://docs.adslop.fi',
-        'basePath': '/my-new-app/',
-        'sourceRepoUrl': 'https://github.com/Adslop/my-new-app',
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob('*'))
+        if path.is_file() and '__pycache__' not in path.parts
     }
 
 
-@_requires_seed
-def test_file_bootstrap_is_idempotent(tmp_path: Path) -> None:
-    # The bootstrap workflow triggers on every push to main, so the rewrite
-    # must be a no-op once the repository is already specialized -- otherwise
-    # every later merge re-runs it and opens a spurious bootstrap PR.
-    repo = tmp_path / 'repo'
-    shutil.copytree(REPO_ROOT, repo, ignore=_IGNORE)
-    cmd = [
-        sys.executable, 'governance/bootstrap_repository.py', '--files-only',
-        '--repo-name', 'my-new-app', '--owner', 'Adslop',
-    ]
-    first = subprocess.run(cmd, cwd=repo, check=False, capture_output=True, text=True)
-    assert first.returncode == 0, first.stderr + first.stdout
-    assert (repo / 'my_new_app').is_dir()
+@pytest.mark.parametrize(('slug', 'package'), [
+    ('Adslop', 'adslop'),
+    ('My-New-App', 'my_new_app'),
+    ('class', 'class_pkg'),
+])
+def test_mixed_case_identity_is_not_rewritten_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slug: str, package: str,
+) -> None:
+    seed = _seed_repository(tmp_path)
+    module = _bootstrap()
+    monkeypatch.setattr(module, 'REPO_ROOT', tmp_path)
+    module._apply_file_bootstrap(slug, package, 'mikkokotila')
 
-    # Tune a module budget the way a real slice does -- the exact value the
-    # un-guarded re-run used to revert, opening a spurious bootstrap PR.
-    budget_path = repo / '.github' / 'budgets.json'
-    budgets = json.loads(budget_path.read_text(encoding='utf-8'))
-    budgets['modules']['my_new_app/__init__.py'] = 999
-    budget_path.write_text(json.dumps(budgets, indent=2) + '\n', encoding='utf-8')
+    assert (tmp_path / package / '__init__.py').is_file()
+    assert not (tmp_path / seed).exists()
+    assert f'name = "{slug}"' in (tmp_path / 'pyproject.toml').read_text()
+    layout = yaml.safe_load((tmp_path / 'governance.yml').read_text())['layout']
+    assert layout == {'package_root': package, 'coverage_source': package}
+    assert json.loads((tmp_path / 'profile.json').read_text()) == {
+        'name': slug, 'source': f'https://github.com/mikkokotila/{slug}', 'package': package,
+    }
+    assert f"import_module('{package}')" in (tmp_path / 'tests/package/test_import.py').read_text()
+    assert (tmp_path / '.github/workflows/example.yml').read_text() == f'name: {seed}\n'
 
-    before = _tree_hashes(repo)
-    second = subprocess.run(cmd, cwd=repo, check=False, capture_output=True, text=True)
-    assert second.returncode == 0, second.stderr + second.stdout
-    assert 'already specialized' in second.stdout
-    assert _tree_hashes(repo) == before, 'second bootstrap run must change nothing'
-    # The tuned budget survived: the re-run did not regenerate it.
-    reread = json.loads(budget_path.read_text(encoding='utf-8'))
-    assert reread['modules']['my_new_app/__init__.py'] == 999
+
+def test_file_bootstrap_preserves_calibrated_state_on_repeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_repository(tmp_path)
+    module = _bootstrap()
+    monkeypatch.setattr(module, 'REPO_ROOT', tmp_path)
+    module._apply_file_bootstrap('Adslop', 'adslop', 'mikkokotila')
+    budget_path = tmp_path / '.github/budgets.json'
+    budgets = json.loads(budget_path.read_text())
+    budgets['modules']['adslop/__init__.py'] = 999
+    budget_path.write_text(json.dumps(budgets))
+    before = _tree_hashes(tmp_path)
+
+    module._apply_file_bootstrap('Adslop', 'adslop', 'mikkokotila')
+
+    assert _tree_hashes(tmp_path) == before

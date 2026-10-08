@@ -1,7 +1,7 @@
 # Configuration
 
-Everything a repository can change about how its gates behave lives in two
-files. This page is the canonical description of both: what each one holds,
+The repository declares gate configuration and ratchet budgets in two
+files. GitHub settings and credentials are separate setup dependencies. This page is the canonical description of both: what each one holds,
 why the split exists, and what happens when a value is absent or wrong.
 
 ## The two files
@@ -40,12 +40,12 @@ half-finished package rename cannot silently disable it.
 
 ```yaml
 layout:
-  package_root: Adslop
+  package_root: adslop
   test_paths:
     - tests/package
   gate_test_paths:
     - governance/tests
-  coverage_source: Adslop
+  coverage_source: adslop
   excludes:
     - __pycache__
     - build
@@ -93,11 +93,11 @@ in [`CLAUDE.md`](../../CLAUDE.md), and the required status checks in
 `.github/rulesets/main.json`. Any single-file edit that moves one of those
 three away from the other two fails, and the failure names both sides.
 
-To adopt this template partially, set `enabled: false` on the gates you do not
-want — that withdraws the gate from all three descriptions at once, and the
-gate itself reports `SKIP` rather than running. A value that is not a boolean
-blocks rather than being read as either on or off, because a typo that
-silently disabled a gate is the failure this switch exists to make visible.
+A configuration switch does not amend repository law or update live GitHub
+protection. Any authorized gate change must update the matching law, snapshot,
+workflow contract, and live settings together. A disabled gate reports `SKIP`;
+that is not evidence of the property it previously tested. A non-boolean
+switch value blocks rather than being interpreted as enabled or disabled.
 
 ### Policy settings
 
@@ -168,9 +168,9 @@ never writes this section enforces every law on every author — the shipped
 `governance.yml` is what turns the exemption on, not the gate.
 
 Set `exempt_gates: []` to hold bots to laws 1 and 5 like anyone else. The
-remaining nine laws — typing, fail-loud, lint, tests, CodeQL, honesty, ruleset,
-conventional commits, and branch protection — run on bot pull requests either
-way; this exempts two, not the gate suite.
+other configured laws remain applicable to bot pull requests; this exemption
+does not disable the rest of the gate suite. The current unavailable live
+controls are documented in [SETUP.md](../../SETUP.md).
 
 The skip is printed with the author and the gate that allowed it, because an
 exemption that leaves no trace in the log is one nobody audits.

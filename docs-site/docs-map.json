@@ -52,6 +52,13 @@
       "sidebarLabel": "Docs hub"
     },
     {
+      "source": "SPECIFICATION.md",
+      "dest": "overview/specification.md",
+      "slug": "/overview/specification",
+      "sidebarPosition": 2,
+      "sidebarLabel": "Product specification (planned)"
+    },
+    {
       "source": "docs/Guides/README.md",
       "dest": "guides/documentation-site.md",
       "slug": "/guides/documentation-site",
@@ -80,7 +87,7 @@
       "sidebarLabel": "Documentation system"
     },
     {
-      "source": "Adslop/README.md",
+      "source": "adslop/README.md",
       "dest": "packages/python-package.md",
       "slug": "/packages/python-package",
       "sidebarPosition": 1,

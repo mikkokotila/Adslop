@@ -79,7 +79,7 @@ changelog:
 
 bootstrap:
   timeout_minutes: 30
-  labels_file: .github/labels.json
+  labels_manifest: .github/labels.json
   secrets:
     bootstrap_token: REPO_BOOTSTRAP_TOKEN
     ruleset_audit_token: RULESET_AUDIT_TOKEN

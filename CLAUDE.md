@@ -2,7 +2,9 @@
 
 The repository law, operating discipline, and code stance — the single canonical constitution for every contributor, human or agent.
 
-> **Creating or bootstrapping a new repository from this template?** Read [SETUP.md](SETUP.md) first — it lists every secret, variable, and permission the rules require, with the exact steps, verification, and failure modes. Set those up before relying on any gate.
+> **Installing or activating Adslop governance?** Read [SETUP.md](SETUP.md) first. It records the required credentials, platform capability, review eligibility, and observed activation blockers. Checked-in rules are not evidence that GitHub is enforcing them.
+
+The tagged contributor rules are in [PR_GUIDELINE.md](PR_GUIDELINE.md), and Adslop-specific scope is in [REPO_SPECIFICS.md](REPO_SPECIFICS.md). [SPECIFICATION.md](SPECIFICATION.md) defines product intent; implementation evidence establishes current behavior.
 
 ## Motivation
 
@@ -12,7 +14,7 @@ We don't want saga ornamentation. We want commits that move the needle. The need
 
 Ten laws. Nine are workflow gates on every PR; the tenth is branch protection on `main`. Any failure blocks merge. No bypass.
 
-1. **Every PR closes exactly one OPEN slice-labelled issue — plus that slice's parent PRD when, and only when, the slice is the PRD's last open sub-issue.** PR title byte-equals the slice issue's title. Diff stays within the issue's `## Surfaces` globs. Diff touches no path in `## Out of Scope`. Issue body preserves every `> **Significance.**` blockquote from the slice template verbatim, and every `Done Means` checkbox is checked or carries `OVERRULED: <reason>` before merge; the `slice_closeout_guard` workflow writes the closeout evidence fields when a merged PR closes the issue and reopens an evidence-less close. A PR opened by an author in `automation.bot_authors` skips this law while `automation.exempt_gates` lists `slice` — dependency bumps carry no slice issue, and the other nine laws still run on them. *(pr_checks_slice)*
+1. **Every PR closes exactly one OPEN slice-labelled issue — plus that slice's parent PRD when, and only when, the slice is the PRD's last open sub-issue.** PR title byte-equals the slice issue's title. Diff stays within the issue's `## Surfaces` globs. Diff touches no path in `## Out of Scope`. Issue body preserves every `> **Significance.**` blockquote from the slice template verbatim, and every `Done Means` checkbox is checked or carries `OVERRULED: <reason>` before merge; the `slice_closeout_guard` workflow writes the closeout evidence fields when a merged PR closes the issue and reopens an evidence-less close. A PR opened by an author in `automation.bot_authors` skips this law while `automation.exempt_gates` lists `slice` — dependency bumps carry no slice issue, and the remaining applicable laws still run on them. *(pr_checks_slice)*
 
 2. **PR title, every non-merge commit, and the linked issue title match Conventional Commits v1.0.0, and no commit message or the PR title names an AI/LLM assistant.** Allowed types: `feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert`. *(pr_checks_cc)*
 
@@ -20,7 +22,7 @@ Ten laws. Nine are workflow gates on every PR; the tenth is branch protection on
 
 4. **Silent-fallback patterns never grow.** No new bare `except:`, empty handler (`pass`, `...`, `return`, `return None`, `continue`, `break`), `contextlib.suppress` (or any alias chain thereof), or `errors='ignore'`. The `fail_loud` budget in `.github/budgets.json` cannot be raised, and the scan surface in `governance.yml` cannot be narrowed, by the PR it gates. *(pr_checks_fail_loud)*
 
-5. **Every PR bumps the version and leaves a CHANGELOG trail.** `[project].version` advances strictly forward by `MAJOR.MINOR.PATCH`. `CHANGELOG.md`'s first `# v<X.Y.Z>` header equals the new version and carries at least one content line, written imperatively ("Add", not "Added") and free of leftover placeholders. Bump level meets the Conventional Commits type minimum: `type!` → major, `feat` → minor, else patch. A PR opened by an author in `automation.bot_authors` skips this law while `automation.exempt_gates` lists `version` — a dependency bump is not a release of this project. *(pr_checks_version)*
+5. **Every PR records a valid release version and leaves a CHANGELOG trail.** An existing `[project].version` advances strictly forward by canonical numeric `MAJOR.MINOR.PATCH`. `CHANGELOG.md`'s first `# v<X.Y.Z>` header equals the new version and carries at least one content line beyond headings, written imperatively ("Add", not "Added") and free of leftover placeholders. Bump level meets the Conventional Commits type minimum: `type!` → major, `feat` → minor, else patch. Initial-version mode applies only when both `pyproject.toml` and `CHANGELOG.md` are absent on the Git-verified ancestor PR base and the PR adds both; the first version and matching content receive the same validation, without inventing a prior version. A partial baseline or missing head artifact fails. A PR opened by an author in `automation.bot_authors` skips this law while `automation.exempt_gates` lists `version` — a dependency bump is not a release of this project. *(pr_checks_version)*
 
 6. **The lint gate passes.** Ruff, at the version `pyproject.toml` pins, across the package, `governance/`, and `tests/`; no dead code (vulture); every package module and every `governance/` module within its declared line budget in `.github/budgets.json` (file-size balance applies to the package tree, where a ratio is meaningful; the gate modules are held by their individual budgets instead), and every module carrying a docstring except where `governance.yml` exempts it; the docstring conventions, file-size balance (against the bound that file declares), and test/code ratio all hold; no test outside the paths `governance.yml` names as infrastructure uses `try`/`except`, and no honesty-violation is swallowed; changed lines arrive covered; declared runtime dependencies carry no known vulnerability (pip-audit, with time-boxed `.github/vuln_exceptions.json` entries); the documentation corpus passes its locked audit, lint, link, build, route, asset, browser, and accessibility checks; and the coverage floor in `.github/budgets.json` holds and ratchets upward — it cannot be lowered by the PR it gates without a `[coverage-lower: <field>: <reason>]` marker. *(pr_checks_lint)*
 
@@ -31,7 +33,7 @@ Ten laws. Nine are workflow gates on every PR; the tenth is branch protection on
 
 9. **Live branch protection on `main` matches `.github/rulesets/main.json`.** Changing branch protection out-of-band (in the GitHub UI) blocks the next PR until the snapshot is updated in a PR of its own. *(pr_checks_ruleset)*
 
-10. **No direct push to `main`. No force-push. No branch deletion.** Branch must be up-to-date with `main` before merge. One Copilot review required; all review threads resolved. *(branch protection, server-side)*
+10. **No direct push to `main`. No force-push. No branch deletion.** Branch must be up-to-date with `main` before merge. Require one eligible independent human approval, code-owner review on enforcement surfaces, independent approval of the latest push, and resolution of every review thread. The ruleset requests Copilot review on every push; complete that review before merge. No bypass actors. *(branch protection, server-side)*
 
 Beyond the gates, `audit_main_ruleset` re-checks the live ruleset on every push to `main` with a privileged token — including `bypass_actors`, which the PR-time ruleset gate (`pr_checks_ruleset`) cannot observe. It is a post-merge alarm, not a merge gate, so it carries no law of its own.
 
@@ -39,11 +41,13 @@ Beyond the gates, `audit_main_ruleset` re-checks the live ruleset on every push 
 
 Branch off `main`. Commit the first working increment and push to a remote branch of the same name, then **open the PR right away — before you run the gates locally, and never as a draft.** Opening it first starts CI immediately; run the local gate suite afterwards, keep working while GitHub runs the gates too, and don't wait for CI in the foreground. Never sit on local verification without an open PR; open a real PR or none.
 
-**`zero-bang` is the approving authority — the operator.** ("The operator" throughout this document is that human reviewer: the one who judges the work at review time and whose approval unlocks merge.) Request their review the moment the PR is open. Once every requested change is addressed, re-request `zero-bang`'s review.
+**Mikko Kotila (`mikkokotila`) is the project authority and operator.** He decides scope, appointments, and release authorization. Request an authorized, eligible independent reviewer when the PR opens and again after requested changes are addressed. Read your own full diff before requesting that review.
+
+Only Mikko is currently declared as maintainer and code owner. A PR authored or last pushed by his account cannot obtain the required independent approval from the same account. Missing reviewer access remains an explicit blocker; do not invite an unrelated account or bypass the policy. See [MAINTAINERS.md](MAINTAINERS.md). The project-authority setting does not make GitHub enforce a single reviewer identity when the ruleset's `required_reviewers` list is empty.
 
 Each push re-runs every gate. Prefer new commits to amends — amends don't give you anything and they muddle the PR history. Keep one logical change per commit; don't batch unrelated changes together. Before you request review, read your own full diff in GitHub — catch what you'd flag in someone else's PR.
 
-Merge unlocks when every required gate is green **and** the branch is up-to-date with `main`. Up-to-date is enforced server-side; rebase when main advances.
+Merge requires every applicable gate to be green on the exact candidate, a branch up-to-date with `main`, eligible independent reviews, and resolved threads. Rebase when main advances. Claim server-side protection only after the live activation checks in [SETUP.md](SETUP.md) succeed; unavailable enforcement is a blocker, not a waiver.
 
 When a gate fails, the gate's own output names the reason. Read the output, fix the code or the slice issue, push again. If the failure is the gate being wrong rather than the PR being wrong, fix the gate in its own PR — the ruleset drift gate (`pr_checks_ruleset`) will force the matching ruleset-snapshot update so no gate relaxation side-enters.
 
@@ -84,7 +88,7 @@ Concrete house style the gates don't check — not judgment calls, just the defa
 - **Public surface.** Expose the public API explicitly with `__all__`; prefix internal names with `_`.
 - **Resources.** Use context managers for anything that must close; avoid mutable default arguments; prefer `pathlib` over `os.path`.
 - **LLM output.** A model may draft, but raw model output is never dropped in as-is — the contributor simplifies it, understands it, and owns it.
-- **Docs.** Author each thing once: one page is canonical, the rest link to it. Show real, runnable examples and current behavior — never imaginary examples or aspirational framing.
+- **Docs.** Author each thing once: one page is canonical, the rest link to it. Show real, runnable examples and current behavior. Product requirements may describe intended behavior when explicitly labelled, as in `SPECIFICATION.md`; do not present that intent as implemented capability.
 - **Release notes.** Technically correct, concise in summary, specific in detail, and tied to the pushed tag.
 
 ## When in doubt, stop

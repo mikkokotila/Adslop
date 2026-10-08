@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   checkLink,
+  extractExternalLinks,
+  publicLinkStatus,
   MAX_ATTEMPTS,
   RETRYABLE_STATUS,
 } from '../scripts/check-external-links.mjs';
@@ -93,4 +95,44 @@ test('the retryable set covers only transient statuses', () => {
       `${status} names a wrong link, so retrying it hides the finding`,
     );
   }
+});
+
+
+test('extracts reference-style citations without scanning code examples', () => {
+  const markdown = [
+    'Source [one][source-one] and [two][source-two].',
+    '[source-one]: https://example.test/one',
+    '[source-two]: <https://example.test/two> "Title"',
+    '```markdown',
+    '[example]: https://example.test/code-only',
+    '```',
+  ].join('\n');
+  assert.deepEqual(
+    [...extractExternalLinks(markdown)],
+    ['https://example.test/one', 'https://example.test/two'],
+  );
+});
+
+
+test('verifies a HEAD-rejected source with GET instead of ignoring its error', async () => {
+  const methods = [];
+  const send = async (_url, method) => {
+    methods.push(method);
+    return {statusCode: method === 'HEAD' ? 404 : 200, resume() {}};
+  };
+  await checkLink('https://example.test/source', (url) => publicLinkStatus(url, send));
+  assert.deepEqual(methods, ['HEAD', 'GET']);
+});
+
+test('a source returning 404 to GET still fails', async () => {
+  const methods = [];
+  const send = async (_url, method) => {
+    methods.push(method);
+    return {statusCode: 404, resume() {}};
+  };
+  await assert.rejects(
+    () => checkLink('https://example.test/missing', (url) => publicLinkStatus(url, send)),
+    /returned 404/,
+  );
+  assert.deepEqual(methods, ['HEAD', 'GET']);
 });
