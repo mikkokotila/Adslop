@@ -71,29 +71,27 @@ Signup, trial, subscription, purchase, renewal, refund, forecast value, and real
 
 For API access, verify the selected app use case, granted scopes, business assets, and account permissions. The current [Marketing API setup matrix][meta-access] is the applicable starting point. Private use does not justify assuming every verification requirement disappears.
 
-## Bunny: edge collection with a durable acceptance boundary
+## Bunny: query-string events from polled access logs
 
-Bunny can receive the actual POST body: its standalone scripts handle standard HTTP requests, and an official example reads JSON from the request. The runtime is Deno with TypeScript/JavaScript and WebAssembly support. The example's virtual filesystem is worker memory, not durable storage. [Standalone scripts][bunny-standalone] [Request-body example][bunny-request] [Edge Scripting][bunny-edge]
+Mikko's clarified design places the required event fields in the incoming URL query parameters, even when the request method is POST. Adslop polls the access logs approximately every five minutes and accepts their three-day retention. The absence of POST bodies does not invalidate this model: the event representation is in the logged URL.
 
-| Assumption | Current primary-source finding |
-| --- | --- |
-| A perpetual free service | A 14-day trial, followed by usage pricing and an advertised monthly minimum |
-| Seven days of CDN logs | Three-day retention in the current logging contract |
-| POST payloads recoverable from access logs | The documented schema contains request metadata, not the POST body |
-| Log forwarding is a reliable event stream | UDP forwarding has no retransmission and no complete-delivery guarantee |
-| Permanent logs are a complete durable ledger | Compressed parts upload after closure; completeness is expressly not guaranteed |
+Bunny's standard v2 `path` includes the query string, and `url` composes scheme, host, and path; extended logging is unnecessary. Use the recommended JSON API v2, because the legacy pipe-delimited export strips literal pipe characters from user-controlled fields. [CDN logging][bunny-logs]
 
-The logging findings come from [CDN logging][bunny-logs], [forwarding][bunny-forwarding], and [permanent storage][bunny-permanent]. Payloads should remain outside URLs, referrers, authorization headers, and diagnostic logs. The analytical source is the validated event body committed by the collector.
+The planned route belongs to a logging-enabled Pull Zone. A thin edge script can validate the query envelope and return the response. Standalone scripts act as the origin for their Pull Zone; they do not require a separate origin server. If a cacheable request variant needs per-request validation, before-cache execution is the documented mechanism. Logging and script execution are separate concerns. [Standalone scripts][bunny-standalone] [Before-cache execution][bunny-before-cache]
 
-[Published scripting pricing][bunny-pricing] is $0.20 per million requests plus $0.02 per 1,000 CPU seconds, rounded in billing increments across scripts; CDN bandwidth is additional. The [product page][bunny-edge] advertises a $1 monthly minimum. These are input prices, not an Adslop production-cost estimate.
+The ingestion proposal uses explicit UTC windows, ascending timestamp order, all pages, overlapping reads, and periodic rescans of older windows before expiry. The API exposes `from`/`to`, pagination, request IDs, and optional origin-shield records; its published availability is near real-time. Keep origin-shield records out of the client-event stream. [CDN logging][bunny-logs] A page or completed poll is not a declared immutable source snapshot. Persist retrieved evidence and validated batches before advancing their checkpoints, and retain a separate view of coverage and source maturity. Each source record receives a durable admitted, rejected, or quarantined disposition. Invalid or conflicting public requests retain their evidence and reason while later records continue; quarantined records retain an explicit reprocessing obligation. Checkpoint progress depends on a committed disposition, not successful admission of every request as a business event. Transient failures before any disposition is committed still block progress.
 
-The proposed flow is: validate the POST, atomically persist its payload/identity/receipt in the canonical sink, return success after the required commit, then project committed evidence into analytical batches. Retries reuse identity. Conflicting payloads fail explicitly. Loss of the response after commit must be harmless. A background promise that continues after the response is not, by itself, durable event acceptance.
+Deduplicate request observations by Pull Zone and request ID. Separately deduplicate canonical outcomes by the declared product/source namespace and stable event ID in the query: a client retry can create another request for the same event. Preserve the returned URL, decoded event, source identity, parser/schema version, and import-batch identity. Compare canonical event content rather than URL parameter order. Conflicting reuse fails explicitly; legitimate corrections have revision identity.
 
-The sink must meet the declared production failure model. Bunny Database currently permits loss of recently acknowledged writes on primary failover because durable archival follows its primary WAL asynchronously. It is unsuitable as the sole acknowledged-event guarantee under a zero-loss failover requirement. [Bunny Database durability][bunny-db] That finding does not rule out Bunny as the edge entry point.
+The states are request handled at Bunny, log record observed by Adslop, and event durably admitted into Adslop. Canonical admission commits validated event content, identity, receipt, and provenance together. It happens during ingestion, so this design does not require a synchronous database write before the edge response. Recovery recognizes already-admitted events and recorded rejection or quarantine dispositions. Before canonical storage is selected or deployed, declare the production failure model and measurable loss/recovery objectives for events, evidence, dispositions, and checkpoints. Validate them across the relevant interruption, storage-failure, and primary-failover paths, including after the provider's source copy expires. A checkpoint cannot recover ahead of the retained data and dispositions it covers. After admission, replay relies on Adslop's retained evidence under that contract.
 
-A transactional store such as PostgreSQL is the preferred candidate for events, command work, and reservations. Its durability depends on the actual configuration: synchronous commit with configured synchronous standbys can wait for durable replica flush, while other modes provide weaker guarantees. Validate the chosen hosting and failover arrangement rather than relying on the product name. [PostgreSQL WAL settings][postgres-wal]
+The approximately five-minute schedule and three-day source retention provide a practical retrieval and recovery window. Monitor ingestion lag, failed polls, pagination completion, and the oldest unimported interval with margin before expiry. Revisit windows for late entries. An expired or unavailable interval is a coverage gap, not zero conversions. A numeric maximum publication delay, logged-URL length/truncation limits, and the original-versus-rewritten URL logging stage were not established in the inspected references. Verify query round-trip fidelity, encoding boundaries, and observed publication behavior on the configured route. The schema supports the proposal; no account-level collection test has occurred.
 
-CDN logs remain useful for transport reconciliation. Polling them requires overlapping windows, stable request identity, bounded pagination, and explicit gaps; it cannot recover an absent POST payload. No Bunny account or deployment was created in this research.
+Optional UDP forwarding and Permanent Log Storage have their own delivery and rotation limitations. Their documentation directs precise reporting to the Logging API or Statistics API; those optional-path warnings must not be transferred into an assertion that the selected HTTP API has the same loss behavior. [Forwarding][bunny-forwarding] [Permanent storage][bunny-permanent] No inspected contract makes the original edge response a durable Adslop admission receipt.
+
+Bunny advertises a 14-day trial and a $1 monthly minimum. Scripting costs are published as $0.20 per million requests plus $0.02 per 1,000 CPU seconds, with billing increments and CDN bandwidth additional. These are input prices, not an Adslop cost estimate. [Edge Scripting][bunny-edge] [Scripting pricing][bunny-pricing] No account or deployment was created in this research.
+
+The product used for canonical storage remains a separate decision. A transactional store such as PostgreSQL is a candidate for admitted events, command work, and reservations; its actual synchronous-commit, replication, and failover configuration must satisfy the chosen recovery objectives. [PostgreSQL WAL settings][postgres-wal] Bunny Database is a different product from CDN logs and currently documents possible loss of recently acknowledged writes on primary failover. That finding matters only if it is considered as the canonical store. [Bunny Database durability][bunny-db]
 
 ## Arrow, Polars, DuckDB, and storage
 
@@ -126,7 +124,7 @@ DuckDB's native storage is not the multi-process transactional command service. 
 
 Polars already implements its engine in Rust and provides its own compute and buffer implementations. Python expressions can therefore describe native work without moving analytical loops into Python. [Polars overview][polars] A custom Rust [expression plugin][polars-plugins] can extend that path without a wholesale application rewrite.
 
-My recommendation is a modular Python API and workers, transactional event/outbox/reservation storage, native Polars analytics, a pinned optimization solver, and DuckDB for analytical SQL. If Bunny is selected, keep its TypeScript edge entry point thin. The human UI remains a separate client of the same API; this backend recommendation does not imply writing a browser application in Python.
+My recommendation is a modular Python API and workers, transactional event/outbox/reservation storage, native Polars analytics, a pinned optimization solver, and DuckDB for analytical SQL. Keep the planned Bunny TypeScript edge entry point thin. The human UI remains a separate client of the same API; this backend recommendation does not imply writing a browser application in Python.
 
 Rust is appropriate for a measured parsing, collection, or custom-kernel bottleneck, or a component whose ownership/resource guarantees justify the added boundary. Begin with native libraries and ordinary compiler optimization. Hand-written intrinsics need profiling, semantic-equivalence evidence, and portable fallback behavior; Rust's own [SIMD guidance][rust-simd] recommends profiling first.
 
@@ -151,7 +149,7 @@ This is an engineering judgment, not a benchmark result. The first reliability p
 [meta-events]: https://developers.facebook.com/documentation/ads-commerce/conversions-api/parameters/server-event.md
 [meta-access]: https://developers.facebook.com/documentation/development/create-an-app/marketing-api-use-cases.md
 [bunny-standalone]: https://bunny.net/docs/scripting/standalone/overview
-[bunny-request]: https://bunny.net/docs/scripting/node-fs
+[bunny-before-cache]: https://bunny.net/docs/scripting/before-cache
 [bunny-edge]: https://bunny.net/edge-scripting/
 [bunny-pricing]: https://bunny.net/docs/scripting/pricing
 [bunny-logs]: https://bunny.net/docs/cdn/logging
