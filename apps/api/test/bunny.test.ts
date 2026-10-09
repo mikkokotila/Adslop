@@ -371,17 +371,16 @@ it("serializes overlapping polls and keeps the durable page cursor monotonic", a
   }));
   const a = poll();
   await started;
-  const b = poll();
-  await Promise.resolve();
+  const concurrentResponse = await poll();
+  expect(concurrentResponse.status).toBe(200);
+  expect(await concurrentResponse.json()).toMatchObject({
+    status: "already_running", complete: false,
+  });
   expect(offsets).toEqual([0]);
   unblock();
-  const [firstResponse, concurrentResponse] = await Promise.all([a, b]);
+  const firstResponse = await a;
   expect(firstResponse.status).toBe(200);
-  expect(concurrentResponse.status).toBe(200);
   expect(await firstResponse.json()).toMatchObject({
-    complete: false, next_offset: 20000, admitted: 1,
-  });
-  expect(await concurrentResponse.json()).toMatchObject({
     complete: false, next_offset: 20000, admitted: 1,
   });
   expect(offsets).toHaveLength(20);

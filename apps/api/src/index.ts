@@ -207,18 +207,17 @@ export class MoneyLedger extends DurableObject<Env> {
     });
   }
 
-  // All scheduled and manual calls for this Durable Object share one scan.
-  // A second invocation must never overwrite a cursor advanced by the first.
-  private activeBunnyPoll: ReturnType<MoneyLedger["pollBunnyOnce"]> | null = null;
+  // Do not share promises or I/O objects across Durable Object request
+  // contexts. One poll owns the cursor; a concurrent poll reports busy.
+  private bunnyPollRunning = false;
 
   async pollBunny(now: number) {
-    if (this.activeBunnyPoll) return this.activeBunnyPoll;
-    const task = this.pollBunnyOnce(now);
-    this.activeBunnyPoll = task;
+    if (this.bunnyPollRunning) return { status: "already_running", complete: false };
+    this.bunnyPollRunning = true;
     try {
-      return await task;
+      return await this.pollBunnyOnce(now);
     } finally {
-      if (this.activeBunnyPoll === task) this.activeBunnyPoll = null;
+      this.bunnyPollRunning = false;
     }
   }
 
