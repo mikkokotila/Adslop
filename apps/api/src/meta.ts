@@ -41,6 +41,24 @@ function day(value: string): number {
   return n;
 }
 
+// Source fields are Meta's responsibility, not caller-supplied query parameters.
+// Translate source violations to a 502 rather than blaming the API caller.
+function sourceAccountId(value: unknown): string {
+  try {
+    return accountId(string(value));
+  } catch {
+    throw new MetaReadError("meta_invalid_response", 502);
+  }
+}
+
+function sourceDay(value: unknown): number {
+  try {
+    return day(string(value));
+  } catch {
+    throw new MetaReadError("meta_invalid_response", 502);
+  }
+}
+
 export function exactMetaMinor(spend: string, currency: string): bigint {
   if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(spend) ||
       !/^[A-Z]{3}$/.test(currency)) throw new MetaReadError("meta_invalid_money", 502);
@@ -135,7 +153,7 @@ type MetaAccount = {
 };
 
 function parseAccount(value: MetaJson): MetaAccount {
-  const id = accountId(string(value.id));
+  const id = sourceAccountId(value.id);
   const currency = string(value.currency);
   if (!/^[A-Z]{3}$/.test(currency)) throw new MetaReadError("meta_invalid_currency", 502);
   const tz = string(value.timezone_name);
@@ -170,15 +188,15 @@ function parseSpendRows(
 ): DailySpendRow[] {
   const idField = level === "account" ? "account_id" : level + "_id";
   const nameField = level + "_name";
-  return data.map((entry) => {
+  const rows = data.map((entry) => {
     const date = string(entry.date_start), stop = string(entry.date_stop);
-    const parsedDate = day(date), parsedStop = day(stop);
+    const parsedDate = sourceDay(date), parsedStop = sourceDay(stop);
     if (parsedDate !== parsedStop || parsedDate < since || parsedDate > until) {
       throw new MetaReadError("meta_invalid_response", 502);
     }
-    const accountOnRow = accountId(string(entry.account_id));
+    const accountOnRow = sourceAccountId(entry.account_id);
     if (accountOnRow !== account.account_id) throw new MetaReadError("meta_account_mismatch", 502);
-    const entityId = level === "account" ? account.account_id : accountId(string(entry[idField]));
+    const entityId = level === "account" ? account.account_id : sourceAccountId(entry[idField]);
     const name = level === "account" ? account.name : entry[nameField];
     if (name !== undefined && name !== null && typeof name !== "string") {
       throw new MetaReadError("meta_invalid_response", 502);
@@ -196,6 +214,13 @@ function parseSpendRows(
       clicks: entry.clicks === undefined ? null : string(entry.clicks),
     };
   });
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.entity_id + ":" + row.date_start;
+    if (seen.has(key)) throw new MetaReadError("meta_duplicate_row", 502);
+    seen.add(key);
+  }
+  return rows;
 }
 
 async function dailyInsights(id: string, level: MetaLevel, token: string,

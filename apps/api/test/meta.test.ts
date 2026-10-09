@@ -178,3 +178,51 @@ it("keeps Meta routes behind the existing operator authorization", async () => {
   expect(disconnected.status).toBe(503);
   expect(await disconnected.json()).toEqual({ error: "meta_not_configured" });
 });
+
+it("rejects overlapping Meta account-day rows instead of double-counting spend", async () => {
+  const row = {
+    account_id: id, date_start: "2026-09-10", date_stop: "2026-09-10",
+    spend: "11.20", impressions: "2", clicks: "0",
+  };
+  const seen = stubGraph((url) => {
+    if (url.pathname === "/v25.0/act_" + id) return Response.json(account());
+    if (url.searchParams.get("after") === "overlapping-page") {
+      return Response.json({ data: [row] });
+    }
+    return Response.json({
+      data: [row],
+      paging: { next: "https://graph.facebook.com/v25.0/act_" + id +
+        "/insights?after=overlapping-page" },
+    });
+  });
+  const result = await handleMetaRequest(new URL(base + "/v1/meta/spend?" +
+    "account_id=" + id + "&since=2026-09-10&until=2026-09-10"
+  ), token);
+  expect(result.status).toBe(502);
+  expect(await result.json()).toEqual({ error: "meta_duplicate_row" });
+  expect(seen).toHaveBeenCalledTimes(3);
+});
+
+it("classifies malformed source IDs and dates as upstream errors, not caller errors", async () => {
+  stubGraph(() => Response.json({ data: [{
+    ...account(), id: "act_bad_upstream_id",
+  }] }));
+  const invalidSourceId = await handleMetaRequest(
+    new URL(base + "/v1/meta/accounts"), token
+  );
+  expect(invalidSourceId.status).toBe(502);
+  expect(await invalidSourceId.json()).toEqual({ error: "meta_invalid_response" });
+
+  stubGraph((url) => {
+    if (url.pathname === "/v25.0/act_" + id) return Response.json(account());
+    return Response.json({ data: [{
+      account_id: id, date_start: "2026-02-30", date_stop: "2026-02-30",
+      spend: "1.00", impressions: "2", clicks: "0",
+    }] });
+  });
+  const invalidSourceDate = await handleMetaRequest(new URL(base +
+    "/v1/meta/spend?account_id=" + id + "&since=2026-02-01&until=2026-03-01"
+  ), token);
+  expect(invalidSourceDate.status).toBe(502);
+  expect(await invalidSourceDate.json()).toEqual({ error: "meta_invalid_response" });
+});
