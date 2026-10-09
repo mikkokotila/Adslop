@@ -228,14 +228,14 @@ export class MoneyLedger extends DurableObject<Env> {
     const targetTo = now - 60_000;
     const desiredFrom = cursor?.from_ms ??
       (latest ? latest.through_ms - 15 * 60_000 : targetTo - 15 * 60_000);
-    const from = Math.max(desiredFrom, earliest);
-    const to = cursor && cursor.from_ms >= earliest ? cursor.to_ms : targetTo;
-    const resumeOffset = cursor && cursor.from_ms >= earliest ? cursor.next_offset : 0;
+    // An active cursor owns a fixed query window and offset. Advancing the
+    // source-retention floor must not reset a partially processed backlog.
+    // Record any expired interval as a coverage gap, not an implicit success.
+    const from = cursor ? cursor.from_ms : Math.max(desiredFrom, earliest);
+    const to = cursor ? cursor.to_ms : targetTo;
+    const resumeOffset = cursor ? cursor.next_offset : 0;
     if (desiredFrom < earliest) {
       this.recordBunnyGap(zoneId, desiredFrom, earliest);
-      if (cursor) this.ctx.storage.sql.exec(
-        "DELETE FROM bunny_scan_cursor WHERE zone_id=?", zoneId
-      );
     }
     if (from >= to) {
       return { from, to, scanned: 0, admitted: 0, duplicate: 0,

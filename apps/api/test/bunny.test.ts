@@ -299,3 +299,50 @@ it("retains original allowed fields when rejecting a signed invalid amount or so
   }
   expect(await money()).toMatchObject({ subscription_revenue_minor: 0 });
 });
+
+it("preserves the page cursor when Bunny retention advances during a backlog", async () => {
+  vi.useFakeTimers();
+  try {
+    const start = new Date("2026-10-09T12:00:00Z");
+    vi.setSystemTime(start);
+    setLogPages([[]]);
+    expect((await poll()).status).toBe(200);
+
+    const later = start.getTime() + 4 * 86_400_000;
+    vi.setSystemTime(later);
+    const event = await signedLog("44444444444444444444444444444444", "floor-event", "7");
+    const offsets: number[] = [];
+    const windows: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (request: URL | RequestInfo) => {
+      const url = new URL(String(request));
+      const offset = Number(url.searchParams.get("offset"));
+      offsets.push(offset);
+      windows.push(url.searchParams.get("from") + "|" + url.searchParams.get("to"));
+      return Response.json({
+        data: [{ ...event, requestId: offset.toString(16).padStart(32, "0") }],
+        pagination: { offset, limit: 1000, returned: 1, hasMore: offset < 20000 },
+      });
+    }));
+    expect(await (await poll()).json()).toMatchObject({
+      complete: false, next_offset: 20000, admitted: 1,
+    });
+    vi.setSystemTime(later + 60_000); // the three-day floor now exceeds cursor.from_ms
+    expect(await (await poll()).json()).toMatchObject({
+      complete: true, scanned: 1, admitted: 0,
+    });
+    expect(offsets).toHaveLength(21);
+    expect(offsets[20]).toBe(20000);
+    expect(windows[20]).toBe(windows[0]);
+    expect(await money()).toMatchObject({ subscription_revenue_minor: 7 });
+
+    const coverage = await worker.fetch(new Request(
+      endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+      { headers: { Authorization: authorization } }
+    ), env as Env);
+    const report = await coverage.json() as { known_gaps: unknown[]; completeness: string };
+    expect(report.completeness).toBe("known_gap");
+    expect(report.known_gaps).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
