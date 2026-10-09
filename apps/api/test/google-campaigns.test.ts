@@ -1,8 +1,16 @@
-/// <reference types="vite/client" />
 import { env } from 'cloudflare:workers';
 import { afterEach, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
-import readme from '../../../README.md?raw';
+
+declare global {
+  interface ImportMeta {
+    glob(pattern: string, options: { query: '?raw'; import: 'default'; eager: true }):
+      Record<string, string>;
+  }
+}
+const readme = import.meta.glob('../../../README.md', {
+  query: '?raw', import: 'default', eager: true,
+})['../../../README.md'];
 
 const customer = '1234567890';
 const manager = '9876543210';
