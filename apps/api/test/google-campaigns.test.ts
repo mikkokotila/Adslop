@@ -1,6 +1,8 @@
+/// <reference types="vite/client" />
 import { env } from 'cloudflare:workers';
 import { afterEach, expect, it, vi } from 'vitest';
 import worker, { type Env } from '../src/index';
+import readme from '../../../README.md?raw';
 
 const customer = '1234567890';
 const root = 'https://adslop.test/v1/google-ads/accounts/' + customer;
@@ -11,6 +13,7 @@ const credentials = {
   GOOGLE_ADS_DEVELOPER_TOKEN: 'fixture-developer',
 };
 const config = {
+  contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
   name: 'Paused Search fixture',
   daily_budget_micros: '10000000',
   cpc_bid_micros: '250000',
@@ -38,8 +41,10 @@ type NativeState = {
 
 function googleMock(options: {
   mismatch?: boolean; active?: boolean; shared?: boolean; denyMutate?: boolean;
+  declarationMismatch?: boolean; readbackStatus?: number; failAfterMutation?: number;
 } = {}) {
   let state: NativeState | null = null;
+  let failedReadback = false;
   const mutations: Array<{ mutateOperations: Array<Record<string, any>> }> = [];
   const fetchMock = vi.fn(async (uri: RequestInfo | URL, init?: RequestInit) => {
     const url = String(uri);
@@ -60,6 +65,8 @@ function googleMock(options: {
       const ops = request.mutateOperations;
       const prefix = 'customers/' + customer + '/';
       if (ops[0].campaignBudgetOperation?.create) {
+        expect(ops[1].campaignOperation.create.containsEuPoliticalAdvertising)
+          .toBe('DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING');
         state = {
           budget: { resourceName: prefix + 'campaignBudgets/510',
             amountMicros: ops[0].campaignBudgetOperation.create.amountMicros,
@@ -68,6 +75,9 @@ function googleMock(options: {
             name: ops[1].campaignOperation.create.name, advertisingChannelType: 'SEARCH',
             campaignBudget: prefix + 'campaignBudgets/510',
             biddingStrategyType: 'MANUAL_CPC',
+            containsEuPoliticalAdvertising: options.declarationMismatch
+              ? 'CONTAINS_EU_POLITICAL_ADVERTISING'
+              : ops[1].campaignOperation.create.containsEuPoliticalAdvertising,
             networkSettings: { targetGoogleSearch: true,
               targetSearchNetwork: false, targetContentNetwork: false } },
           group: { id: '710', name: ops[2].adGroupOperation.create.name,
@@ -125,6 +135,14 @@ function googleMock(options: {
       return Response.json({ results: [{ campaignBudget: state.budget }] });
     }
     if (query.includes('FROM campaign')) {
+      expect(query).toContain('campaign.contains_eu_political_advertising');
+      if (options.readbackStatus && !failedReadback &&
+          mutations.length >= (options.failAfterMutation ?? 1)) {
+        failedReadback = true;
+        return Response.json({ error: 'UNAVAILABLE' }, {
+          status: options.readbackStatus, headers: { 'request-id': 'fixture-readback' },
+        });
+      }
       return Response.json({ results: [{ campaign: state.campaign }] });
     }
     if (query.includes('FROM ad_group_criterion')) {
@@ -165,7 +183,10 @@ it('creates one atomic PAUSED keyword Search campaign and verifies native config
   const readback = await call('GET', '/paused-search-campaigns/610');
   expect(readback.status).toBe(200);
   expect(await readback.json()).toMatchObject({
-    status: 'verified_paused', native: { keywords: [{ status: 'PAUSED' }] },
+    status: 'verified_paused', native: { keywords: [
+      { status: 'PAUSED', keyword: { text: 'hello world', matchType: 'EXACT' } },
+      { status: 'PAUSED', keyword: { text: 'search service', matchType: 'PHRASE' } },
+    ] },
   });
 });
 
@@ -190,10 +211,101 @@ it('updates only name and a dedicated budget while retaining campaign PAUSED', a
 });
 
 it('rejects write/readback mismatches rather than reporting a verified campaign', async () => {
-  googleMock({ mismatch: true });
+  const google = googleMock({ mismatch: true });
   const reply = await call('POST', '/paused-search-campaigns', config);
   expect(reply.status).toBe(409);
-  expect(await reply.json()).toMatchObject({ error: 'google_ads_write_readback_mismatch' });
+  expect(await reply.json()).toMatchObject({
+    error: 'google_ads_write_readback_mismatch', status: 'write_unverified',
+    customer_id: customer, campaign_id: '610',
+    campaign_resource_name: 'customers/' + customer + '/campaigns/610',
+    budget_resource_name: 'customers/' + customer + '/campaignBudgets/510',
+    ad_group_resource_name: 'customers/' + customer + '/adGroups/710',
+    ad_resource_name: 'customers/' + customer + '/adGroupAds/710~910',
+  });
+  expect(google.mutations).toHaveLength(1);
+});
+
+it.each([429, 503])('preserves created resources after a %i readback failure without retrying', async (status) => {
+  const google = googleMock({ readbackStatus: status });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(503);
+  expect(await reply.json()).toMatchObject({
+    error: 'google_ads_quota_or_service_unavailable', request_id: 'fixture-readback',
+    status: 'write_unverified', customer_id: customer, campaign_id: '610',
+    campaign_resource_name: 'customers/' + customer + '/campaigns/610',
+    budget_resource_name: 'customers/' + customer + '/campaignBudgets/510',
+    ad_group_resource_name: 'customers/' + customer + '/adGroups/710',
+    ad_resource_name: 'customers/' + customer + '/adGroupAds/710~910',
+  });
+  const recovered = await call('GET', '/paused-search-campaigns/610');
+  expect(recovered.status).toBe(200);
+  expect(await recovered.json()).toMatchObject({ status: 'verified_paused', campaign_id: '610' });
+  expect(google.mutations).toHaveLength(1);
+});
+
+it('preserves update identity when readback fails after the second acknowledged mutation', async () => {
+  const google = googleMock({ readbackStatus: 503, failAfterMutation: 2 });
+  expect((await call('POST', '/paused-search-campaigns', config)).status).toBe(201);
+  const updated = await call('PATCH', '/paused-search-campaigns/610', {
+    daily_budget_micros: '11000000',
+  });
+  expect(updated.status).toBe(503);
+  expect(await updated.json()).toMatchObject({
+    status: 'write_unverified', campaign_id: '610', request_id: 'fixture-readback',
+    budget_resource_name: 'customers/' + customer + '/campaignBudgets/510',
+  });
+  const recovered = await call('GET', '/paused-search-campaigns/610');
+  expect(recovered.status).toBe(200);
+  expect(await recovered.json()).toMatchObject({ native: { budget: { amountMicros: '11000000' } } });
+  expect(google.mutations).toHaveLength(2);
+});
+
+it('rejects a native political-ad declaration that differs from the submitted declaration', async () => {
+  const google = googleMock({ declarationMismatch: true });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(409);
+  expect(await reply.json()).toMatchObject({
+    status: 'write_unverified', error: 'google_ads_write_readback_mismatch', campaign_id: '610',
+  });
+  expect(google.mutations).toHaveLength(1);
+});
+
+it('requires an explicit non-political declaration without making external requests', async () => {
+  const google = googleMock();
+  const { contains_eu_political_advertising: declaration, ...missing } = config;
+  expect(declaration).toBe('DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING');
+  for (const body of [missing, { ...config, contains_eu_political_advertising: 'UNSPECIFIED' },
+    { ...config, contains_eu_political_advertising: 'CONTAINS_EU_POLITICAL_ADVERTISING' }]) {
+    const reply = await call('POST', '/paused-search-campaigns', body);
+    expect(reply.status).toBe(400);
+    expect(await reply.json()).toMatchObject({ error: 'google_ads_eu_political_campaign_unsupported' });
+  }
+  expect(google.calls).toHaveBeenCalledTimes(0);
+});
+
+it('rejects non-string keyword match types without coercion or external requests', async () => {
+  const google = googleMock();
+  for (const match_type of [{ toString: null }, ['EXACT'], null, 1]) {
+    const reply = await call('POST', '/paused-search-campaigns', {
+      ...config, keywords: [{ text: 'hello world', match_type }],
+    });
+    expect(reply.status).toBe(400);
+    expect(await reply.json()).toMatchObject({ error: 'google_ads_invalid_keyword_match_type' });
+  }
+  expect(google.calls).toHaveBeenCalledTimes(0);
+});
+
+it('accepts the documented POST body verbatim as a paused campaign request', async () => {
+  const google = googleMock();
+  const example = /`POST \/v1\/google-ads\/accounts\/\{id\}\/paused-search-campaigns` with `([^`]+)`/.exec(readme);
+  expect(example).not.toBeNull();
+  const reply = await worker.fetch(new Request(root + '/paused-search-campaigns', {
+    method: 'POST', headers: { Authorization: 'Bearer test-only-economic-ledger' },
+    body: example![1],
+  }), { ...env, ...credentials } as Env);
+  expect(reply.status).toBe(201);
+  expect(await reply.json()).toMatchObject({ status: 'verified_paused', campaign_id: '610' });
+  expect(google.mutations).toHaveLength(1);
 });
 
 it('refuses updates to paid-active Search campaigns and shared budgets', async () => {

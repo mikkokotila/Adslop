@@ -7,6 +7,7 @@ import { GoogleAdsClient, GoogleAdsError, type GoogleAdsConfig } from './google'
 type MatchType = 'EXACT' | 'PHRASE' | 'BROAD';
 interface Keyword { text: string; match_type: MatchType }
 interface CreateSearch {
+  contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING';
   name: string;
   daily_budget_micros: string;
   cpc_bid_micros: string;
@@ -18,8 +19,20 @@ interface CreateSearch {
 interface UpdateSearch { name?: string; daily_budget_micros?: string }
 type Native = Record<string, unknown>;
 
+interface WriteIdentity {
+  customer_id: string;
+  campaign_id?: string;
+  campaign_resource_name?: string;
+  budget_resource_name?: string;
+  ad_group_resource_name?: string;
+  ad_resource_name?: string;
+}
+
 class CampaignError extends Error {
-  constructor(readonly code: string, readonly status: number) {
+  constructor(
+    readonly code: string, readonly status: number,
+    readonly write?: WriteIdentity, readonly requestId: string | null = null,
+  ) {
     super(code);
   }
 }
@@ -73,13 +86,20 @@ function parseCreate(value: unknown): CreateSearch {
   const v = input(value, [
     'name', 'daily_budget_micros', 'cpc_bid_micros',
     'keywords', 'headlines', 'descriptions', 'final_url',
+    'contains_eu_political_advertising',
   ]);
+  // The API requires an explicit declaration. Do not invent one on behalf
+  // of the marketer; this slice does not support EU political campaigns.
+  if (v.contains_eu_political_advertising !== 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING') {
+    throw new CampaignError('google_ads_eu_political_campaign_unsupported', 400);
+  }
   if (!Array.isArray(v.keywords) || v.keywords.length < 1 || v.keywords.length > 25) {
     throw new CampaignError('google_ads_invalid_keywords', 400);
   }
   const keywords = v.keywords.map((raw: unknown): Keyword => {
     const key = input(raw, ['text', 'match_type']);
-    if (!['EXACT', 'PHRASE', 'BROAD'].includes(String(key.match_type))) {
+    if (typeof key.match_type !== 'string' ||
+        !['EXACT', 'PHRASE', 'BROAD'].includes(key.match_type)) {
       throw new CampaignError('google_ads_invalid_keyword_match_type', 400);
     }
     return { text: name(key.text, 80), match_type: key.match_type as MatchType };
@@ -97,6 +117,7 @@ function parseCreate(value: unknown): CreateSearch {
     throw new CampaignError('google_ads_invalid_final_url', 400);
   }
   return {
+    contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
     name: name(v.name, 128),
     daily_budget_micros: positiveMicros(v.daily_budget_micros),
     cpc_bid_micros: positiveMicros(v.cpc_bid_micros),
@@ -169,7 +190,8 @@ async function snapshot(client: GoogleAdsClient, customer: string, campaignId: s
   const campaigns = await client.search(customer,
     'SELECT campaign.id, campaign.name, campaign.status, ' +
     'campaign.advertising_channel_type, campaign.campaign_budget, ' +
-    'campaign.bidding_strategy_type, campaign.network_settings.target_google_search, ' +
+    'campaign.bidding_strategy_type, campaign.contains_eu_political_advertising, ' +
+    'campaign.network_settings.target_google_search, ' +
     'campaign.network_settings.target_search_network, ' +
     'campaign.network_settings.target_content_network FROM campaign ' +
     'WHERE campaign.id = ' + number);
@@ -227,6 +249,7 @@ function verifyCreate(
     s.campaign.status !== 'PAUSED',
     s.campaign.advertisingChannelType !== 'SEARCH',
     s.campaign.biddingStrategyType !== 'MANUAL_CPC',
+    s.campaign.containsEuPoliticalAdvertising !== expected.contains_eu_political_advertising,
     s.campaign.campaignBudget !== budgetName,
     settings.targetGoogleSearch !== true,
     settings.targetSearchNetwork === true,
@@ -277,6 +300,7 @@ async function create(client: GoogleAdsClient, customer: string, config: CreateS
     { campaignOperation: { create: {
       resourceName: campaign, name: config.name, status: 'PAUSED',
       advertisingChannelType: 'SEARCH', campaignBudget: budget,
+      containsEuPoliticalAdvertising: config.contains_eu_political_advertising,
       manualCpc: { enhancedCpcEnabled: false },
       networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false,
         targetContentNetwork: false, targetPartnerSearchNetwork: false },
@@ -306,27 +330,36 @@ async function create(client: GoogleAdsClient, customer: string, config: CreateS
     mutateOperations: operations, partialFailure: false,
     responseContentType: 'RESOURCE_NAME_ONLY',
   });
-  const budgetName = mutatedResource(response, 0, 'campaignBudget');
-  const campaignName = mutatedResource(response, 1, 'campaign');
-  const groupName = mutatedResource(response, 2, 'adGroup');
-  const adName = mutatedResource(response, operations.length - 1, 'adGroupAd');
-  // Validate all native keyword mutate responses as well.
-  for (let i = 0; i < config.keywords.length; i++) {
-    mutatedResource(response, i + 3, 'adGroupCriterion');
+  const identity: WriteIdentity = { customer_id: customer };
+  try {
+    const campaignName = mutatedResource(response, 1, 'campaign');
+    identity.campaign_resource_name = campaignName;
+    const campaignId = googleResource(customer, 'campaigns', campaignName);
+    identity.campaign_id = campaignId;
+    const budgetName = mutatedResource(response, 0, 'campaignBudget');
+    identity.budget_resource_name = budgetName;
+    const groupName = mutatedResource(response, 2, 'adGroup');
+    identity.ad_group_resource_name = groupName;
+    const adName = mutatedResource(response, operations.length - 1, 'adGroupAd');
+    identity.ad_resource_name = adName;
+    // Keep acknowledged identities even if another response or readback fails.
+    for (let i = 0; i < config.keywords.length; i++) {
+      mutatedResource(response, i + 3, 'adGroupCriterion');
+    }
+    const groupId = googleResource(customer, 'adGroups', groupName);
+    if (!adName.startsWith(prefix + 'adGroupAds/' + groupId + '~')) {
+      throw new CampaignError('google_ads_mutate_resource_missing', 502);
+    }
+    const actual = await snapshot(client, customer, campaignId);
+    verifyCreate(actual, campaignId, budgetName, groupId, adName, config);
+    return { status: 'verified_paused', ...identity,
+      native: actual, paid_delivery_authorized: false };
+  } catch (error) {
+    if (error instanceof CampaignError || error instanceof GoogleAdsError) {
+      throw new CampaignError(error.code, error.status, identity, error.requestId);
+    }
+    throw error;
   }
-  const campaignId = googleResource(customer, 'campaigns', campaignName);
-  const groupId = googleResource(customer, 'adGroups', groupName);
-  if (!adName.startsWith(prefix + 'adGroupAds/' + groupId + '~')) {
-    throw new CampaignError('google_ads_mutate_resource_missing', 502);
-  }
-  const actual = await snapshot(client, customer, campaignId);
-  verifyCreate(actual, campaignId, budgetName, groupId, adName, config);
-  return {
-    status: 'verified_paused', customer_id: customer, campaign_id: campaignId,
-    campaign_resource_name: campaignName, budget_resource_name: budgetName,
-    ad_group_resource_name: groupName, ad_resource_name: adName,
-    native: actual, paid_delivery_authorized: false,
-  };
 }
 
 async function update(
@@ -359,25 +392,34 @@ async function update(
     mutateOperations: operations, partialFailure: false,
     responseContentType: 'RESOURCE_NAME_ONLY',
   });
-  if (mutatedResource(response, 0, 'campaign') !==
-      'customers/' + customer + '/campaigns/' + campaignId) {
-    throw new CampaignError('google_ads_mutate_resource_missing', 502);
-  }
-  if (config.daily_budget_micros !== undefined &&
-      mutatedResource(response, 1, 'campaignBudget') !== budgetName) {
-    throw new CampaignError('google_ads_mutate_resource_missing', 502);
-  }
-  const actual = await snapshot(client, customer, campaignId);
-  ensurePaused(actual);
-  if ((config.name !== undefined && actual.campaign.name !== config.name) ||
-      (config.daily_budget_micros !== undefined &&
-       actual.budget.amountMicros !== config.daily_budget_micros)) {
-    throw new CampaignError('google_ads_write_readback_mismatch', 409);
-  }
-  return {
-    status: 'verified_paused', customer_id: customer, campaign_id: campaignId,
-    native: actual, paid_delivery_authorized: false,
+  const identity: WriteIdentity = {
+    customer_id: customer, campaign_id: campaignId,
+    campaign_resource_name: 'customers/' + customer + '/campaigns/' + campaignId,
+    budget_resource_name: budgetName,
   };
+  try {
+    if (mutatedResource(response, 0, 'campaign') !== identity.campaign_resource_name) {
+      throw new CampaignError('google_ads_mutate_resource_missing', 502);
+    }
+    if (config.daily_budget_micros !== undefined &&
+        mutatedResource(response, 1, 'campaignBudget') !== budgetName) {
+      throw new CampaignError('google_ads_mutate_resource_missing', 502);
+    }
+    const actual = await snapshot(client, customer, campaignId);
+    ensurePaused(actual);
+    if ((config.name !== undefined && actual.campaign.name !== config.name) ||
+        (config.daily_budget_micros !== undefined &&
+         actual.budget.amountMicros !== config.daily_budget_micros)) {
+      throw new CampaignError('google_ads_write_readback_mismatch', 409);
+    }
+    return { status: 'verified_paused', ...identity,
+      native: actual, paid_delivery_authorized: false };
+  } catch (error) {
+    if (error instanceof CampaignError || error instanceof GoogleAdsError) {
+      throw new CampaignError(error.code, error.status, identity, error.requestId);
+    }
+    throw error;
+  }
 }
 
 /** Routes only explicit pause-first creation and restricted updates. */
@@ -420,7 +462,10 @@ export async function pausedSearchCampaigns(
     if (error instanceof CampaignError || error instanceof GoogleAdsError) {
       return Response.json({
         error: error.code,
-        request_id: error instanceof GoogleAdsError ? error.requestId : null,
+        request_id: error.requestId,
+        ...(error instanceof CampaignError && error.write ? {
+          status: 'write_unverified', ...error.write, paid_delivery_authorized: false,
+        } : {}),
       }, { status: error.status });
     }
     throw error;
