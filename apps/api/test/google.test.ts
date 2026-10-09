@@ -5,6 +5,8 @@ import worker, { type Env } from '../src/index';
 const base = 'https://adslop.test';
 const id = '1234567890';
 const manager = '9876543210';
+const secondManager = '2222222222';
+const secondClient = '3333333333';
 const credentials = {
   GOOGLE_ADS_CLIENT_ID: 'test-client-id',
   GOOGLE_ADS_CLIENT_SECRET: 'test-client-secret',
@@ -37,6 +39,7 @@ function stubAds(options: {
   mixedDirect?: boolean; adsNetworkFailure?: boolean; badJson?: boolean;
   managerValue?: { value: unknown }; directAccounts?: number;
   nameValue?: { value: unknown }; accessibleNames?: unknown;
+  multipleManagers?: boolean;
 } = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
@@ -65,38 +68,38 @@ function stubAds(options: {
         return Response.json({ resourceNames: Array.from({ length: options.directAccounts },
           (_, index) => 'customers/' + String(1000000000 + index)) });
       }
-      return Response.json({ resourceNames: options.mixedDirect
-        ? ['customers/' + manager, 'customers/1111111111']
-        : ['customers/' + manager] });
+      return Response.json({ resourceNames: [
+        'customers/' + manager,
+        ...(options.mixedDirect ? ['customers/1111111111'] : []),
+        ...(options.multipleManagers ? ['customers/' + secondManager] : []),
+      ] });
     }
     const req = JSON.parse(init?.body as string) as Record<string, unknown>;
     calls.push({ url, request: req });
     const query = req.query as string;
-    if (options.mixedDirect && !query.includes('FROM customer_client')) {
-      const customerId = /customers\/(\d+)\//.exec(url)![1];
-      expect(new Headers(init?.headers).get('login-customer-id')).toBe(customerId === id ? manager : null);
+    const customerId = /customers\/(\d+)\//.exec(url)![1];
+    if ((options.mixedDirect || options.multipleManagers) && !query.includes('FROM customer_client')) {
+      const expectedLogin = customerId === id ? manager : customerId === secondClient ? secondManager : null;
+      expect(new Headers(init?.headers).get('login-customer-id')).toBe(expectedLogin);
     }
     if (query.includes('FROM customer_client')) {
-      expect(new Headers(init?.headers).get('login-customer-id')).toBe(manager);
+      expect(new Headers(init?.headers).get('login-customer-id')).toBe(customerId);
       return Response.json({ results: [
         { customerClient: {
-          id: id, descriptiveName: 'Client fixture', currencyCode: 'EUR',
+          id: customerId === secondManager ? secondClient : id,
+          descriptiveName: 'Client fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: false, status: 'ENABLED',
           ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
         { customerClient: {
-          id: manager, descriptiveName: 'Manager fixture', currencyCode: 'EUR',
+          id: customerId, descriptiveName: 'Manager fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: true, status: 'ENABLED',
           ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
       ] });
     }
     if (query.includes('FROM customer') && query.includes('customer.id')) {
-      const info = accountInfo(
-        options.directAccounts ? /customers\/(\d+)/.exec(url)![1] :
-          url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
-        url.includes(manager),
-      );
+      const info = accountInfo(customerId, customerId === manager || customerId === secondManager);
       return Response.json({ results: [{ customer: {
         ...info.customer,
         ...(options.managerValue ? { manager: options.managerValue.value } : {}),
@@ -198,6 +201,30 @@ it.each([undefined, null, ''])('reads unnamed direct and managed accounts: %s', 
       '/spend?from=2026-10-08&to=2026-10-08');
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ account_spend_micros: '1000001' });
+  }
+});
+
+it.each([manager, ''])('reads each managed client through its discovered hierarchy: %s', async (login) => {
+  stubAds({ multipleManagers: true, mixedDirect: true });
+  const config = { ...credentials, GOOGLE_ADS_LOGIN_CUSTOMER_ID: login };
+  const discovery = await get('/v1/google-ads/accounts', config);
+  expect(discovery.status).toBe(200);
+  const result = await discovery.json() as { accounts: Array<{
+    id: string; login_customer_id: string | null;
+  }> };
+  expect(result.accounts.find((account) => account.id === secondClient)?.login_customer_id).toBe(secondManager);
+  for (const customerId of [id, secondClient, '1111111111']) {
+    for (const route of ['campaigns', 'keywords', 'spend?from=2026-10-08&to=2026-10-08']) {
+      const response = await get('/v1/google-ads/accounts/' + customerId + '/' + route, config);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { account?: { login_customer_id: string | null } };
+      if (body.account) {
+        const expectedLogin = customerId === id ? manager : customerId === secondClient ? secondManager : null;
+        expect(body.account.login_customer_id).toBe(expectedLogin);
+      } else {
+        expect(body).toMatchObject({ customer_id: customerId, account_spend_micros: '1000001' });
+      }
+    }
   }
 });
 

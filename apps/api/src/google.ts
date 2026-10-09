@@ -113,6 +113,7 @@ function accountFrom(value: Record<string, unknown>, loginId: string | null): Ac
 /** One request-scoped OAuth access token and bounded, complete GAQL paging. */
 export class GoogleAdsClient {
   private directCustomers?: Set<string>;
+  private discoveredAccounts?: Account[];
 
   private constructor(
     private readonly env: GoogleAdsConfig,
@@ -253,12 +254,13 @@ export class GoogleAdsClient {
 
   private async loginCustomerId(customerId: string, loginId?: string | null): Promise<string | null> {
     if (loginId !== undefined) return loginId;
-    const configured = this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
-    if (!configured || (await this.directCustomerIds()).has(customerId)) return null;
-    return configured;
+    if ((await this.directCustomerIds()).has(customerId)) return null;
+    const discovered = (await this.accounts()).find((account) => account.id === customerId);
+    return discovered ? discovered.login_customer_id : this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ?? null;
   }
 
   async accounts(): Promise<Account[]> {
+    if (this.discoveredAccounts) return this.discoveredAccounts;
     const accounts = new Map<string, Account>();
     for (const id of await this.directCustomerIds()) {
       const customer = await this.account(id, null);
@@ -277,7 +279,8 @@ export class GoogleAdsClient {
       }
       if (accounts.size > 1000) throw new GoogleAdsError('google_ads_account_limit_exceeded', 503);
     }
-    return [...accounts.values()].sort((a, b) => a.id.localeCompare(b.id));
+    this.discoveredAccounts = [...accounts.values()].sort((a, b) => a.id.localeCompare(b.id));
+    return this.discoveredAccounts;
   }
 
   async inventory(customerId: string, type: 'campaigns' | 'keywords'): Promise<AdsRow[]> {
