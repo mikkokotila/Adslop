@@ -40,6 +40,7 @@ function stubAds(options: {
   managerValue?: { value: unknown }; directAccounts?: number;
   nameValue?: { value: unknown }; accessibleNames?: unknown;
   multipleManagers?: boolean;
+  invalidRows?: 'account' | 'spend'; pageTokenValue?: { value: unknown };
 } = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
@@ -99,6 +100,7 @@ function stubAds(options: {
       ] });
     }
     if (query.includes('FROM customer') && query.includes('customer.id')) {
+      if (options.invalidRows === 'account') return Response.json({ results: [null] });
       const info = accountInfo(customerId, customerId === manager || customerId === secondManager);
       return Response.json({ results: [{ customer: {
         ...info.customer,
@@ -107,13 +109,15 @@ function stubAds(options: {
       } }] });
     }
     if (query.includes('FROM customer') && query.includes('segments.date')) {
+      if (options.invalidRows === 'spend') return Response.json({ results: [null] });
       return Response.json({ results: [
         { segments: { date: '2026-10-08' }, metrics: { costMicros: '1000001' } },
       ] });
     }
     if (query.includes('FROM campaign') && query.includes('metrics.cost_micros')) {
       if (!req.pageToken) {
-        return Response.json({ results: [campaignRow('600001')], nextPageToken: 'second' });
+        return Response.json({ results: [campaignRow('600001')],
+          nextPageToken: options.pageTokenValue ? options.pageTokenValue.value : 'second' });
       }
       expect(req.pageToken).toBe('second');
       return Response.json({
@@ -279,6 +283,23 @@ it('converts upstream fetch and JSON failures into secret-free machine-readable 
   const oauth = await get('/v1/google-ads/accounts');
   expect(oauth.status).toBe(503);
   expect(await oauth.json()).toMatchObject({ error: 'google_ads_oauth_unavailable' });
+});
+
+it.each(['account', 'spend'] as const)('rejects malformed rows in %s responses', async (source) => {
+  stubAds({ invalidRows: source });
+  const path = source === 'account' ? '/v1/google-ads/accounts' :
+    '/v1/google-ads/accounts/' + id + '/spend?from=2026-10-08&to=2026-10-08';
+  const response = await get(path);
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: 'google_ads_invalid_response', request_id: null });
+});
+
+it.each([0, false, null])('rejects malformed pagination tokens before declaring completeness: %s', async (value) => {
+  stubAds({ pageTokenValue: { value } });
+  const response = await get('/v1/google-ads/accounts/' + id +
+    '/spend?from=2026-10-08&to=2026-10-08');
+  expect(response.status).toBe(502);
+  expect(await response.json()).toEqual({ error: 'google_ads_invalid_page_token', request_id: null });
 });
 
 it('reads all paginated campaign cost as exact micro-units separately from native total', async () => {
