@@ -47,7 +47,7 @@ export function exactMetaMinor(spend: string, currency: string): bigint {
   let digits: number;
   try {
     digits = new Intl.NumberFormat("en", { style: "currency", currency })
-      .resolvedOptions().maximumFractionDigits;
+      .resolvedOptions().maximumFractionDigits ?? -1;
   } catch {
     throw new MetaReadError("meta_invalid_currency", 502);
   }
