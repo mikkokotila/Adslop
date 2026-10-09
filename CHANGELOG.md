@@ -1,3 +1,8 @@
+# v0.1.3
+
+- Align disabled review restriction serialization with GitHub's live ruleset output.
+- Retain active main-branch checks, independent approvals, and no-bypass protections.
+
 # v0.1.2
 
 - Clarify URL-parameter events collected through Bunny access logs at an approximately five-minute cadence.

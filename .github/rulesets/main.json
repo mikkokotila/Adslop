@@ -29,11 +29,7 @@
         "required_review_thread_resolution": true,
         "allowed_merge_methods": [
           "merge"
-        ],
-        "dismissal_restriction": {
-          "enabled": false,
-          "allowed_actors": []
-        }
+        ]
       }
     },
     {
