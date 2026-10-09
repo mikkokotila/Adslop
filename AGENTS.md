@@ -27,29 +27,49 @@ Distinguish operational correctness, attributed revenue, and experimentally
 demonstrated incremental revenue. A phase is complete only when its promised
 marketer capability is demonstrated; passing generic tooling alone is not enough.
 
-## Own every pull request through merge readiness
+## Own every pull request until **every** merge gate is green
 
-**Opening a PR is not delivery. The contributor owns its closeout, end to end.**
-After each push, follow the PR to GitHub's actual merge-ready state on its
-latest commit: no conflicts, current with the base, an eligible independent
-approval (including code-owner and latest-push review where required), and
-**every review conversation explicitly resolved in GitHub**. Editing code or
-replying to a reviewer does *not* close the thread. Reply with the fix commit,
-resolve the thread, and verify that zero unresolved threads remain.
+**Every PR is the agent's responsibility through actual GitHub merge readiness.
+No exceptions, no handoff of routine PR monitoring to the marketer.**
 
-**All applicable CI jobs must finish and be green on the candidate commit.**
-Never call pending, queued, stuck, cancelled, failing, stale, or unexecuted checks
-green. Diagnose failures, fix their causes, rerun the checks, and inspect the
-final results. If a job is intentionally inapplicable, document its justified
-skip rather than claiming it passed. Recheck status and independent approval
-after the last push. Do not say "ready to merge" while any required condition
-is unmet, and never bypass a gate or manufacture an approval.
+- **Push and open the PR immediately.** As soon as a coherent, reviewable working
+  increment exists, commit, push, and open a **non-draft** PR. Never hold a push
+  or PR for local tests, formatting, builds, or other local preparation. Remote
+  review and CI take priority; run local checks in parallel after the PR exists.
+  On each change, push promptly so the remote reflects the current candidate.
+- **Monitor one active PR every five minutes, without stopping while working.**
+  Inspect current GitHub CI runs, review decisions and inline comments,
+  unresolved review threads, merge conflicts, branch currency, and mergeability.
+  Every failure receives a technical fix, new push, and repeat verification.
+  Every review comment receives a concrete fix or substantive answer, followed
+  by an explicit **Resolve conversation** action. Verify that zero review
+  threads remain unresolved; a reply or code fix alone never counts.
+- **When working across multiple PRs, check every open PR at least once every
+  ten minutes**, and check an actively edited PR every five minutes. While one
+  PR is waiting for local tests, remote CI, or review, work on the next
+  independently useful PR. No idle waiting and no forgotten PRs.
+- **All checks, not some checks.** The candidate is not complete until **every
+  required and applicable CI workflow and job** has finished successfully on
+  the latest commit: no failures, errors, queued jobs, pending runs, unfinished
+  jobs, stuck executions, or cancellations presented as green. Inspect all
+  configured status contexts, not a selected subset. Diagnose and resolve
+  actual failures; rerun after fixes. Do not relabel a red check as acceptable,
+  mark a slice green while a dependency fails, or bypass/disable any gate.
+- **Require the actual green merge button**: the branch is current with its
+  base, conflicts are absent, the latest commit has eligible independent
+  approval, code-owner and last-push review requirements are met, every
+  conversation is resolved, and GitHub confirms the PR is mergeable. Check
+  again after the last push and before claiming merge readiness.
+- **External blockers must be named precisely and acted on immediately within
+  available authority.** Activate configured enforcement when authorized;
+  if an external entitlement, account secret, or independent human action
+  is truly necessary, identify that exact requirement. A blocked PR stays
+  **blocked**, never 'done' or 'almost green'. Keep doing other useful work
+  while actively checking the open PRs.
 
-**This is the contributor's responsibility, not cleanup delegated to the
-marketer.** Resolve what is within the contributor's authority. When an
-external account permission, paid entitlement, secret, or human decision blocks
-merge, state the exact blocker and the smallest action only the operator can
-take, then continue only with authorized work. Do not quietly abandon the PR.
+These checks are obligations **during active work**. No contributor may claim
+unattended monitoring after the session ends unless a real monitoring service
+has been separately established and verified.
 
 ## Repository law and routes
 
