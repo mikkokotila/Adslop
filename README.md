@@ -10,7 +10,7 @@ The initial operator is Mikko Kotila. The project begins as a private repository
 
 Read [the prose specification](SPECIFICATION.md) for the product requirements, execution and measurement behavior, and acceptance conditions. The [research and proposed stack](docs/Reference/Revenue-Engine-Research.md) records current Meta capabilities, deterministic control methods, and collection/data architecture tradeoffs.
 
-Google Ads read-only reporting is implemented in the local Worker; campaign publication, ledger cost imports and live account validation are not yet delivered. Meta's compatibility with the required keyword-targeting model remains an explicit capability dependency. Two-platform operation remains a first-release requirement.
+Google Ads read-only reporting and revision-aware ledger cost imports are implemented in the local Worker; campaign publication and live account validation remain outstanding. Meta's compatibility with the required keyword-targeting model remains an explicit capability dependency. Two-platform operation remains a first-release requirement.
 
 ## Current implementation
 

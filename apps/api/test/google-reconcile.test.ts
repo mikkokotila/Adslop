@@ -157,6 +157,18 @@ it('rejects source total breaks atomically instead of inventing balancing costs'
   expect((await (await history()).json())).toMatchObject({ revisions: [] });
 });
 
+it.each([
+  { campaign: '909', one: '1000001' },
+  { campaign: '101', one: null },
+])('rejects unreported requested campaign $campaign instead of claiming a duplicate', async ({ campaign, one }) => {
+  native({ one });
+  const result = await api(path + '/reconcile', { ...mapping, campaign_ids: [campaign] });
+  expect(result.status).toBe(409);
+  expect(await result.json()).toMatchObject({ error: 'google_ads_no_selected_campaign_cost_rows' });
+  expect(await (await history()).json()).toMatchObject({ revisions: [] });
+  expect(await (await economics()).json()).toMatchObject({ advertising_spend_micros: '0' });
+});
+
 it('does not erase previously reported expenditure when a native cost row vanishes', async () => {
   native();
   expect((await report()).status).toBe(201);
