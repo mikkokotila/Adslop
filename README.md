@@ -14,7 +14,9 @@ The advertising engine has not yet been implemented. Meta's compatibility with t
 
 ## Current implementation
 
-The repository foundation provides: a minimal importable Python package, governance gates, scoped issue and pull-request workflows, a documentation build, dependency locks, and release tooling. It does not connect to advertising accounts, collect conversion events, or spend money.
+The foundation includes a local Cloudflare Worker economic API that records explicitly submitted subscription receipts, refunds, ad spend, and credits and calculates their difference without assigning subscription revenue to an ad platform. Duplicate event identities are handled transactionally and every admitted observation is retrievable. This API is not deployed and is not yet connected to actual advertising or billing accounts. It does not generate revenue on its own.
+
+To verify the first executable money-in/money-out capability, run `corepack pnpm --dir apps/api install --frozen-lockfile && corepack pnpm --dir apps/api run check`. To run locally, supply a private `API_TOKEN` binding and use `corepack pnpm --dir apps/api run dev` (never commit credentials).
 
 [SETUP.md](SETUP.md) records the GitHub activation procedure and the account prerequisites still outstanding. The checked-in protection policy requires independent review and passing checks. At initial adoption, GitHub refuses private-repository branch protection under the current account plan, both setup secrets are absent, and the write-access invitation for appointed independent reviewer `bit-mis` awaits acceptance. Committed policy is not evidence that server-side enforcement is active.
 

@@ -1,3 +1,9 @@
+# v0.2.0
+
+- Record subscription cash and advertising spend through one authenticated Cloudflare API.
+- Deduplicate economic observations and expose exact money-in/money-out totals with provenance.
+- Test the real Durable Object runtime before connecting advertising and billing sources.
+
 # v0.1.4
 
 - Put subscription receipts net of refunds and chargebacks minus advertising spend net of credits at the center of marketing decisions.

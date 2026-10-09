@@ -7,7 +7,7 @@ backend-path = ["."]
 
 [project]
 name = "Adslop"
-version = "0.1.4"
+version = "0.2.0"
 description = "API-first revenue experimentation for digital products"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -61,6 +61,8 @@ ignore = [
   ".github/**",
   "docs-site/*",
   "docs-site/**",
+  "apps/*",
+  "apps/**",
   "fuzz/*",
   "fuzz/**",
   "scripts/*",
