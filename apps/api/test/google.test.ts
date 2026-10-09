@@ -36,6 +36,7 @@ function stubAds(options: {
   oauthFailure?: boolean; quota?: boolean; cycle?: boolean;
   mixedDirect?: boolean; adsNetworkFailure?: boolean; badJson?: boolean;
   managerValue?: { value: unknown }; directAccounts?: number;
+  nameValue?: { value: unknown }; accessibleNames?: unknown;
 } = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
@@ -57,6 +58,9 @@ function stubAds(options: {
       });
     }
     if (url.endsWith(':listAccessibleCustomers')) {
+      if (options.accessibleNames !== undefined) {
+        return Response.json({ resourceNames: options.accessibleNames });
+      }
       if (options.directAccounts) {
         return Response.json({ resourceNames: Array.from({ length: options.directAccounts },
           (_, index) => 'customers/' + String(1000000000 + index)) });
@@ -68,8 +72,9 @@ function stubAds(options: {
     const req = JSON.parse(init?.body as string) as Record<string, unknown>;
     calls.push({ url, request: req });
     const query = req.query as string;
-    if (options.mixedDirect && query.includes('customer.id')) {
-      expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
+    if (options.mixedDirect && !query.includes('FROM customer_client')) {
+      const customerId = /customers\/(\d+)\//.exec(url)![1];
+      expect(new Headers(init?.headers).get('login-customer-id')).toBe(customerId === id ? manager : null);
     }
     if (query.includes('FROM customer_client')) {
       expect(new Headers(init?.headers).get('login-customer-id')).toBe(manager);
@@ -77,10 +82,12 @@ function stubAds(options: {
         { customerClient: {
           id: id, descriptiveName: 'Client fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: false, status: 'ENABLED',
+          ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
         { customerClient: {
           id: manager, descriptiveName: 'Manager fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: true, status: 'ENABLED',
+          ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
       ] });
     }
@@ -93,6 +100,7 @@ function stubAds(options: {
       return Response.json({ results: [{ customer: {
         ...info.customer,
         ...(options.managerValue ? { manager: options.managerValue.value } : {}),
+        ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
       } }] });
     }
     if (query.includes('FROM customer') && query.includes('segments.date')) {
@@ -169,7 +177,43 @@ it('keeps directly accessible standalone accounts outside the configured manager
   ]);
   expect(result.accounts[0].login_customer_id).toBeNull();
   expect(result.accounts[1].login_customer_id).toBe(manager);
+  for (const customerId of ['1111111111', id]) {
+    for (const route of ['campaigns', 'keywords', 'spend?from=2026-10-08&to=2026-10-08']) {
+      const read = await get('/v1/google-ads/accounts/' + customerId + '/' + route);
+      expect(read.status).toBe(200);
+      const body = await read.json() as { account?: { login_customer_id: string | null } };
+      if (body.account) expect(body.account.login_customer_id).toBe(customerId === id ? manager : null);
+    }
+  }
 });
+
+it.each([undefined, null, ''])('reads unnamed direct and managed accounts: %s', async (value) => {
+  stubAds({ mixedDirect: true, nameValue: { value } });
+  const discovery = await get('/v1/google-ads/accounts');
+  expect(discovery.status).toBe(200);
+  const result = await discovery.json() as { accounts: Array<{ name: string | null }> };
+  expect(result.accounts.map((account) => account.name)).toEqual([null, null, null]);
+  for (const customerId of ['1111111111', id]) {
+    const response = await get('/v1/google-ads/accounts/' + customerId +
+      '/spend?from=2026-10-08&to=2026-10-08');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ account_spend_micros: '1000001' });
+  }
+});
+
+it.each([7, true, {}])('rejects populated non-string account names: %s', async (value) => {
+  stubAds({ nameValue: { value } });
+  expect((await get('/v1/google-ads/accounts')).status).toBe(502);
+});
+
+it.each(['1234567890', 'customers/123-456-7890', 'customers/1234567890/extra', 7, null])(
+  'rejects malformed accessible customer identities: %s', async (value) => {
+    stubAds({ accessibleNames: [value] });
+    const response = await get('/v1/google-ads/accounts');
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: 'google_ads_invalid_account_list' });
+  },
+);
 
 it.each([undefined, null, 'true', 0])('rejects malformed manager flags: %s', async (value) => {
   stubAds({ managerValue: { value } });

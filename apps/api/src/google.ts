@@ -30,7 +30,7 @@ interface SearchPage {
 
 interface Account {
   id: string;
-  name: string;
+  name: string | null;
   currency: string;
   time_zone: string;
   manager: boolean;
@@ -89,13 +89,18 @@ function amountMicros(row: AdsRow): bigint {
   return BigInt(amount);
 }
 
+function accountName(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  return textField(value);
+}
+
 function accountFrom(value: Record<string, unknown>, loginId: string | null): Account {
   if (typeof value.manager !== 'boolean') {
     throw new GoogleAdsError('google_ads_invalid_manager_flag', 502);
   }
   return {
     id: googleId(value.id),
-    name: textField(value.descriptiveName),
+    name: accountName(value.descriptiveName),
     currency: textField(value.currencyCode),
     time_zone: textField(value.timeZone),
     manager: value.manager === true,
@@ -105,6 +110,8 @@ function accountFrom(value: Record<string, unknown>, loginId: string | null): Ac
 
 /** One request-scoped OAuth access token and bounded, complete GAQL paging. */
 export class GoogleAdsClient {
+  private directCustomers?: Set<string>;
+
   private constructor(
     private readonly env: GoogleAdsConfig,
     private readonly accessToken: string,
@@ -190,6 +197,7 @@ export class GoogleAdsClient {
 
   async search(customerId: string, query: string, loginId?: string | null): Promise<AdsRow[]> {
     if (!idPattern.test(customerId)) throw new GoogleAdsError('google_ads_invalid_account', 400);
+    const login = await this.loginCustomerId(customerId, loginId);
     const results: AdsRow[] = [];
     const seen = new Set<string>();
     let pageToken: string | undefined;
@@ -198,7 +206,7 @@ export class GoogleAdsClient {
       const payload: Record<string, string> = { query };
       if (pageToken) payload.pageToken = pageToken;
       const raw = object(await this.request(
-        '/customers/' + customerId + '/googleAds:search', payload, loginId,
+        '/customers/' + customerId + '/googleAds:search', payload, login,
       )) as SearchPage;
       if (raw.results !== undefined && !Array.isArray(raw.results)) {
         throw new GoogleAdsError('google_ads_invalid_page', 502);
@@ -216,23 +224,41 @@ export class GoogleAdsClient {
   }
 
   async account(customerId: string, loginId?: string | null): Promise<Account> {
+    const login = await this.loginCustomerId(customerId, loginId);
     const rows = await this.search(customerId,
       'SELECT customer.id, customer.descriptive_name, customer.currency_code, ' +
-      'customer.time_zone, customer.manager FROM customer', loginId);
+      'customer.time_zone, customer.manager FROM customer', login);
     if (rows.length !== 1) throw new GoogleAdsError('google_ads_account_not_found', 502);
-    return accountFrom(property(rows[0], 'customer'),
-      loginId === undefined ? this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ?? null : loginId);
+    return accountFrom(property(rows[0], 'customer'), login);
   }
 
-  async accounts(): Promise<Account[]> {
+  private async directCustomerIds(): Promise<Set<string>> {
+    if (this.directCustomers) return this.directCustomers;
     const accessible = object(await this.request('/customers:listAccessibleCustomers', undefined, null));
     if (!Array.isArray(accessible.resourceNames)) {
       throw new GoogleAdsError('google_ads_invalid_account_list', 502);
     }
-    const accounts = new Map<string, Account>();
+    const ids = new Set<string>();
     for (const resource of accessible.resourceNames) {
-      const id = textField(resource).replace(/^customers\//, '');
-      if (!idPattern.test(id)) throw new GoogleAdsError('google_ads_invalid_account_list', 502);
+      if (typeof resource !== 'string' || !/^customers\/[0-9]{10}$/.test(resource)) {
+        throw new GoogleAdsError('google_ads_invalid_account_list', 502);
+      }
+      ids.add(resource.slice('customers/'.length));
+    }
+    this.directCustomers = ids;
+    return ids;
+  }
+
+  private async loginCustomerId(customerId: string, loginId?: string | null): Promise<string | null> {
+    if (loginId !== undefined) return loginId;
+    const configured = this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+    if (!configured || (await this.directCustomerIds()).has(customerId)) return null;
+    return configured;
+  }
+
+  async accounts(): Promise<Account[]> {
+    const accounts = new Map<string, Account>();
+    for (const id of await this.directCustomerIds()) {
       const customer = await this.account(id, null);
       accounts.set(id, customer);
       if (accounts.size > 1000) throw new GoogleAdsError('google_ads_account_limit_exceeded', 503);
