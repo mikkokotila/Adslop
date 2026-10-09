@@ -27,6 +27,30 @@ Distinguish operational correctness, attributed revenue, and experimentally
 demonstrated incremental revenue. A phase is complete only when its promised
 marketer capability is demonstrated; passing generic tooling alone is not enough.
 
+## Own every pull request through merge readiness
+
+**Opening a PR is not delivery. The contributor owns its closeout, end to end.**
+After each push, follow the PR to GitHub's actual merge-ready state on its
+latest commit: no conflicts, current with the base, an eligible independent
+approval (including code-owner and latest-push review where required), and
+**every review conversation explicitly resolved in GitHub**. Editing code or
+replying to a reviewer does *not* close the thread. Reply with the fix commit,
+resolve the thread, and verify that zero unresolved threads remain.
+
+**All applicable CI jobs must finish and be green on the candidate commit.**
+Never call pending, queued, stuck, cancelled, failing, stale, or unexecuted checks
+green. Diagnose failures, fix their causes, rerun the checks, and inspect the
+final results. If a job is intentionally inapplicable, document its justified
+skip rather than claiming it passed. Recheck status and independent approval
+after the last push. Do not say "ready to merge" while any required condition
+is unmet, and never bypass a gate or manufacture an approval.
+
+**This is the contributor's responsibility, not cleanup delegated to the
+marketer.** Resolve what is within the contributor's authority. When an
+external account permission, paid entitlement, secret, or human decision blocks
+merge, state the exact blocker and the smallest action only the operator can
+take, then continue only with authorized work. Do not quietly abandon the PR.
+
 ## Repository law and routes
 
 Read **[CLAUDE.md](CLAUDE.md)** first for the binding repository constitution,
