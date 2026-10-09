@@ -9,12 +9,13 @@ const authorization = "Bearer test-only-economic-ledger";
 const signatureKey = "test-only-trusted-commerce-secret";
 
 async function signedLog(
-  requestId: string, eventId: string, amountMinor: string, statusCode = 204
+  requestId: string, eventId: string, amountMinor: string, statusCode = 204,
+  source = "commerce"
 ): Promise<BunnyLog> {
   const params = new URLSearchParams();
   params.set("schema", "1");
   params.set("product_id", "bunny-test");
-  params.set("source", "commerce");
+  params.set("source", source);
   params.set("event_id", eventId);
   params.set("kind", "subscription_receipt");
   params.set("amount_minor", amountMinor);
@@ -232,4 +233,69 @@ it("coalesces gaps when source retention advances during poll failures", async (
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("retries the original time window after a failed first poll", async () => {
+  vi.useFakeTimers();
+  try {
+    const start = new Date("2026-10-09T12:00:00Z");
+    vi.setSystemTime(start);
+    const log = await signedLog("11111111111111111111111111111111", "late-signed", "25");
+    const windows: string[] = [];
+    let fail = true;
+    vi.stubGlobal("fetch", vi.fn(async (request: URL | RequestInfo) => {
+      const url = new URL(String(request));
+      windows.push(String(url.searchParams.get("from")) + "|" + String(url.searchParams.get("to")));
+      if (fail) {
+        fail = false;
+        return new Response("unavailable", { status: 503 });
+      }
+      return Response.json({
+        data: [log],
+        pagination: { offset: 0, limit: 1000, returned: 1, hasMore: false },
+      });
+    }));
+    expect((await poll()).status).toBe(502);
+    const uncommitted = await worker.fetch(new Request(
+      endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+      { headers: { Authorization: authorization } }
+    ), env as Env);
+    expect(await uncommitted.json()).toMatchObject({ through: null });
+    vi.setSystemTime(start.getTime() + 10 * 60_000);
+    expect(await (await poll()).json()).toMatchObject({ admitted: 1, complete: true });
+    expect(windows).toHaveLength(2);
+    expect(windows[0]).toBe(windows[1]);
+    expect(await money()).toMatchObject({ subscription_revenue_minor: 25 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("retains original allowed fields when rejecting a signed invalid amount or source", async () => {
+  const badAmount = await signedLog(
+    "22222222222222222222222222222222", "bad-amount", "0"
+  );
+  const longSource = await signedLog(
+    "33333333333333333333333333333333", "long-source", "200", 204,
+    "a".repeat(128)
+  );
+  setLogPages([[badAmount, longSource]]);
+  expect(await (await poll()).json()).toMatchObject({ admitted: 0, rejected: 2 });
+  for (const [id, field] of [
+    ["22222222222222222222222222222222", "amount_minor=0"],
+    ["33333333333333333333333333333333", "source=" + "a".repeat(128)],
+  ]) {
+    const evidence = await worker.fetch(new Request(
+      endpoint + "/v1/bunny/records/" + id + "?pull_zone_id=12345",
+      { headers: { Authorization: authorization } }
+    ), env as Env);
+    expect(evidence.status).toBe(200);
+    const body = await evidence.json() as {
+      disposition: string; reason: string; raw_json: { path: string };
+    };
+    expect(body.disposition).toBe("rejected");
+    expect(body.reason).toBe("invalid_commercial_event");
+    expect(body.raw_json.path).toContain(field);
+  }
+  expect(await money()).toMatchObject({ subscription_revenue_minor: 0 });
 });

@@ -100,7 +100,9 @@ export async function interpretBunnyLog(
   try { url = new URL(log.url); }
   catch { return { ...base, event: null, reason: "invalid_log_url" }; }
   if (url.pathname !== "/collect") return null;
-  const reject = (reason: string): BunnyEvidence => ({ ...base, event: null, reason });
+  const reject = (reason: string, raw_json: string | null = null): BunnyEvidence => ({
+    ...base, raw_json, event: null, reason,
+  });
   if (url.protocol !== "https:" || url.host !== cfg.host ||
       log.path !== url.pathname + url.search) return reject("source_url_mismatch");
   if (log.statusCode < 200 || log.statusCode >= 300) return reject("edge_request_failed");
@@ -110,21 +112,27 @@ export async function interpretBunnyLog(
     return reject("missing_or_repeated_query_field");
   }
   if (!await verifySignature(params, cfg.signingKey)) return reject("invalid_signature");
-  if (params.get("schema") !== "1") return reject("unsupported_event_schema");
+  // Signed records can safely retain their original allowed URL fields for
+  // diagnosis even when a later semantic check rejects the event.
+  const signedEvidence = sourceJson;
+  if (params.get("schema") !== "1") return reject("unsupported_event_schema", signedEvidence);
   const kind = params.get("kind");
   const amount = params.get("amount_minor") ?? "";
   if ((kind !== "subscription_receipt" && kind !== "subscription_refund") ||
-      !/^[1-9][0-9]*$/.test(amount)) return reject("invalid_commercial_event");
+      !/^[1-9][0-9]*$/.test(amount)) return reject("invalid_commercial_event", signedEvidence);
   const amount_minor = Number(amount);
   const product_id = params.get("product_id") ?? "";
   const sourceName = params.get("source") ?? "";
   const event_id = params.get("event_id") ?? "";
   const currency = params.get("currency") ?? "";
   const occurred_at = params.get("occurred_at") ?? "";
-  if (![product_id, sourceName, event_id].every(
+  const prefixedSource = `bunny:${cfg.zoneId}:${sourceName}`;
+  if (![product_id, sourceName, event_id, prefixedSource].every(
     (id) => id !== "." && id !== ".." && /^[A-Za-z0-9_.:-]{1,128}$/.test(id)
   ) || !Number.isSafeInteger(amount_minor) || !/^[A-Z]{3}$/.test(currency) ||
-      !Number.isFinite(Date.parse(occurred_at))) return reject("invalid_commercial_event");
+      !Number.isFinite(Date.parse(occurred_at))) {
+    return reject("invalid_commercial_event", signedEvidence);
+  }
   return {
     ...base,
     raw_json: sourceJson,

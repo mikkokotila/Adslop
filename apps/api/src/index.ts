@@ -241,6 +241,16 @@ export class MoneyLedger extends DurableObject<Env> {
       return { from, to, scanned: 0, admitted: 0, duplicate: 0,
         rejected: 0, seen: 0, complete: true };
     }
+    // Persist the scan window before any network request. A failed first poll
+    // must retry the same interval instead of silently skipping older receipts.
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        "INSERT INTO bunny_scan_cursor VALUES (?, ?, ?, ?) ON CONFLICT(zone_id) " +
+        "DO UPDATE SET from_ms=excluded.from_ms, to_ms=excluded.to_ms, " +
+        "next_offset=excluded.next_offset",
+        zoneId, from, to, resumeOffset
+      );
+    });
     let scanned = 0, admitted = 0, duplicate = 0, rejected = 0, seen = 0;
     let offset = resumeOffset;
     for (let pageNumber = 0; pageNumber < 20; pageNumber++) {
