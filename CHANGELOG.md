@@ -1,3 +1,17 @@
+# v0.6.0
+
+- Add pause-only atomic Google Search campaign create with dedicated budget, PAUSED keyword ad group, keywords and responsive search ads.
+- Read back native campaign, budget, keyword and creative state before declaring a write verified.
+- Restrict existing paused-campaign updates to name and non-shared budget; reject active campaigns and paid delivery activation.
+- Require an explicit non-political advertiser declaration and preserve native resource identities when acknowledged writes cannot be verified.
+- Route paused campaign mutations through the resolved direct or manager account context.
+
+# v0.5.0
+
+- Reconcile exact Google Ads micro-unit campaign/day cost against account totals before admitting money-out.
+- Append immutable reporting corrections, deduplicate source-period imports, and preserve product, account, currency and time-zone identities.
+- Keep manually posted spend from overlapping authoritative Google charges and expose revision history beside subscription money-in.
+
 # v0.4.0
 
 - Add read-only Google Ads OAuth authentication, account discovery, native campaign and keyword inventory, and dated spend reporting.
