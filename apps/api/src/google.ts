@@ -212,9 +212,9 @@ export class GoogleAdsClient {
       if (raw.results !== undefined && !Array.isArray(raw.results)) {
         throw new GoogleAdsError('google_ads_invalid_page', 502);
       }
-      results.push(...(raw.results ?? []));
+      results.push(...(raw.results ?? []).map(object));
       const next = raw.nextPageToken;
-      if (!next) return results;
+      if (next === undefined || next === '') return results;
       if (typeof next !== 'string' || seen.has(next)) {
         throw new GoogleAdsError('google_ads_invalid_page_token', 502);
       }
