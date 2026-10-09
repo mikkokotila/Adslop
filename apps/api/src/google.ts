@@ -1,5 +1,3 @@
-import type { GoogleSpendReport } from './google-ledger';
-
 /**
  * Read-only Google Ads REST client. Every amount remains an integer micro-unit
  * decimal string; none of the reporting views are additional expenditure.
@@ -158,7 +156,7 @@ export class GoogleAdsClient {
     return new GoogleAdsClient(env, textField(object(reply).access_token));
   }
 
-  async request(path: string, body?: Record<string, unknown>, loginId?: string | null): Promise<unknown> {
+  async request(path: string, body?: Record<string, string>, loginId?: string | null): Promise<unknown> {
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
       'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
@@ -292,7 +290,7 @@ export class GoogleAdsClient {
     return this.search(customerId, query);
   }
 
-  async spend(customerId: string, url: URL): Promise<GoogleSpendReport> {
+  async spend(customerId: string, url: URL): Promise<object> {
     const { from, to } = period(url);
     const view = url.searchParams.get('view') ?? 'campaign';
     if (!['account', 'campaign', 'keyword', 'creative'].includes(view)) {
