@@ -131,3 +131,22 @@ it("keeps exact monetary totals when gross amounts exceed safe Number precision"
     advertising_spend_by_channel_minor: { google: 0, meta: 2 },
   });
 });
+
+it("nets receipts precisely even when gross receipts exceed safe Number precision", async () => {
+  const product = "precision-receipts-test";
+  const big = Number.MAX_SAFE_INTEGER;
+  for (const entry of [
+    observation(product, "r1", "subscription_receipt", big, null),
+    observation(product, "r2", "subscription_receipt", 1, null),
+    observation(product, "refund", "subscription_refund", big, null),
+  ]) {
+    expect((await send("/v1/observations", entry)).status).toBe(201);
+  }
+  const result = await send("/v1/economics?product_id=precision-receipts-test&currency=EUR");
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({
+    subscription_revenue_minor: 1,
+    difference_minor: 1,
+    advertising_spend_minor: 0,
+  });
+});

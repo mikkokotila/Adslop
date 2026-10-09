@@ -107,17 +107,16 @@ export class MoneyLedger extends DurableObject<Env> {
 
   async economics(product: string, currency: string) {
     const rows = this.ctx.storage.sql.exec<{
-      kind: Kind; channel: Channel; total: number;
+      kind: Kind; channel: Channel; amount_minor: number;
     }>(
-      "SELECT kind, channel, SUM(amount_minor) AS total FROM observations " +
-      "WHERE product_id=? AND currency=? GROUP BY kind, channel",
+      "SELECT kind, channel, amount_minor FROM observations WHERE product_id=? AND currency=?",
       product, currency
     ).toArray();
     let receipts = 0n, refunds = 0n, spend = 0n, credits = 0n;
     const byChannel = { google: 0n, meta: 0n };
     for (const row of rows) {
-      if (!Number.isSafeInteger(row.total)) throw new Error("monetary_total_overflow");
-      const amount = BigInt(row.total);
+      if (!Number.isSafeInteger(row.amount_minor)) throw new Error("monetary_total_overflow");
+      const amount = BigInt(row.amount_minor);
       if (row.kind === "subscription_receipt") receipts += amount;
       if (row.kind === "subscription_refund") refunds += amount;
       if (row.kind === "ad_spend") {
