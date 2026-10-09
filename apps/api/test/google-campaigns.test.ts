@@ -56,6 +56,7 @@ function googleMock(options: {
   managed?: boolean;
   mutateFailure?: 'network' | 'invalid_json' | 500 | 503;
   rejectMutateStatus?: 400 | 429;
+  missingMutateResult?: 'campaign' | 'budget'; malformedReadback?: boolean;
 } = {}) {
   let state: NativeState | null = null;
   let failedReadback = false;
@@ -70,7 +71,11 @@ function googleMock(options: {
         status: options.mutateFailure, headers: { 'request-id': 'fixture-mutate' },
       });
     }
-    return Response.json(value);
+    if (options.missingMutateResult) {
+      const rows = (value as { mutateOperationResponses: object[] }).mutateOperationResponses;
+      rows[options.missingMutateResult === 'campaign' ? 1 : 0] = {};
+    }
+    return Response.json(value, { headers: { 'request-id': 'fixture-mutate-ack' } });
   };
   const fetchMock = vi.fn(async (uri: RequestInfo | URL, init?: RequestInit) => {
     const url = String(uri);
@@ -181,6 +186,11 @@ function googleMock(options: {
     }
     if (query.includes('FROM campaign')) {
       expect(query).toContain('campaign.contains_eu_political_advertising');
+      if (options.malformedReadback) {
+        return Response.json({ results: [{ campaign: null }] }, {
+          headers: { 'request-id': 'fixture-native-shape' },
+        });
+      }
       if (options.readbackStatus && !failedReadback &&
           mutations.length >= (options.failAfterMutation ?? 1)) {
         failedReadback = true;
@@ -358,6 +368,39 @@ it.each(ambiguousMutations)('preserves update identity after $failure without re
   expect(stored.status).toBe(200);
   expect(await stored.json()).toMatchObject({ native: { budget: { amountMicros: '11000000' } } });
   expect(google.mutations).toHaveLength(2);
+});
+
+it.each(['campaign', 'budget'] as const)('preserves other acknowledged identities when the %s result is malformed', async (missing) => {
+  const google = googleMock({ missingMutateResult: missing });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(502);
+  expect(await reply.json()).toEqual({
+    error: 'google_ads_invalid_native_response', request_id: 'fixture-mutate-ack',
+    status: 'write_unverified', customer_id: customer, paid_delivery_authorized: false,
+    ...(missing === 'campaign' ? {
+      budget_resource_name: 'customers/' + customer + '/campaignBudgets/510',
+    } : {
+      campaign_id: '610', campaign_resource_name: 'customers/' + customer + '/campaigns/610',
+    }),
+    ad_group_resource_name: 'customers/' + customer + '/adGroups/710',
+    ad_resource_name: 'customers/' + customer + '/adGroupAds/710~910',
+    keyword_resource_names: [
+      'customers/' + customer + '/adGroupCriteria/710~810',
+      'customers/' + customer + '/adGroupCriteria/710~811',
+    ],
+  });
+  expect(google.mutations).toHaveLength(1);
+});
+
+it('preserves a successful HTTP request ID when native readback schema is malformed', async () => {
+  const google = googleMock({ malformedReadback: true });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(502);
+  expect(await reply.json()).toMatchObject({
+    error: 'google_ads_invalid_native_response', request_id: 'fixture-native-shape',
+    status: 'write_unverified', campaign_id: '610',
+  });
+  expect(google.mutations).toHaveLength(1);
 });
 
 it.each([

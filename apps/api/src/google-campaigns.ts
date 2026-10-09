@@ -26,6 +26,7 @@ interface WriteIdentity {
   budget_resource_name?: string;
   ad_group_resource_name?: string;
   ad_resource_name?: string;
+  keyword_resource_names?: string[];
 }
 
 class CampaignError extends Error {
@@ -178,6 +179,40 @@ function mutatedResource(value: unknown, index: number, kind: string): string {
   if (reply.partialFailureError) throw new CampaignError('google_ads_partial_mutation', 502);
   const responses = nativeArray(reply.mutateOperationResponses);
   return field(child(responses[index] ?? {}, kind + 'Result').resourceName);
+}
+
+function acknowledgedCreate(value: unknown, customer: string, keywordCount: number): WriteIdentity {
+  const identity: WriteIdentity = { customer_id: customer };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return identity;
+  const rows = (value as Native).mutateOperationResponses;
+  if (!Array.isArray(rows)) return identity;
+  const resource = (index: number, result: string, kind: string, suffix = '[1-9]\\d*') => {
+    const row = rows[index];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return undefined;
+    const entry = (row as Native)[result + 'Result'];
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
+    const name = (entry as Native).resourceName;
+    return typeof name === 'string' &&
+      new RegExp('^customers/' + customer + '/' + kind + '/' + suffix + '$').test(name)
+      ? name : undefined;
+  };
+  for (const [index, result, kind, key, suffix] of [
+    [0, 'campaignBudget', 'campaignBudgets', 'budget_resource_name', '[1-9]\\d*'],
+    [1, 'campaign', 'campaigns', 'campaign_resource_name', '[1-9]\\d*'],
+    [2, 'adGroup', 'adGroups', 'ad_group_resource_name', '[1-9]\\d*'],
+    [keywordCount + 3, 'adGroupAd', 'adGroupAds', 'ad_resource_name', '[1-9]\\d*~[1-9]\\d*'],
+  ] as const) {
+    const name = resource(index, result, kind, suffix);
+    if (name) identity[key] = name;
+  }
+  if (identity.campaign_resource_name) {
+    identity.campaign_id = identity.campaign_resource_name.split('/').at(-1);
+  }
+  const keywords = Array.from({ length: keywordCount }, (_, i) =>
+    resource(i + 3, 'adGroupCriterion', 'adGroupCriteria', '[1-9]\\d*~[1-9]\\d*'))
+    .filter((name): name is string => name !== undefined);
+  if (keywords.length) identity.keyword_resource_names = keywords;
+  return identity;
 }
 
 function adTexts(list: unknown): string[] {
@@ -349,16 +384,12 @@ async function create(
       responseContentType: 'RESOURCE_NAME_ONLY',
     }, loginCustomerId);
     acknowledged = true;
+    Object.assign(identity, acknowledgedCreate(response, customer, config.keywords.length));
     const campaignName = mutatedResource(response, 1, 'campaign');
-    identity.campaign_resource_name = campaignName;
     const campaignId = googleResource(customer, 'campaigns', campaignName);
-    identity.campaign_id = campaignId;
     const budgetName = mutatedResource(response, 0, 'campaignBudget');
-    identity.budget_resource_name = budgetName;
     const groupName = mutatedResource(response, 2, 'adGroup');
-    identity.ad_group_resource_name = groupName;
     const adName = mutatedResource(response, operations.length - 1, 'adGroupAd');
-    identity.ad_resource_name = adName;
     // Keep acknowledged identities even if another response or readback fails.
     for (let i = 0; i < config.keywords.length; i++) {
       mutatedResource(response, i + 3, 'adGroupCriterion');
@@ -444,6 +475,7 @@ export async function pausedSearchCampaigns(
     url.pathname,
   );
   if (!route) return Response.json({ error: 'google_ads_invalid_campaign_route' }, { status: 400 });
+  let client: GoogleAdsClient | undefined;
   try {
     if (!((request.method === 'POST' && !route[2]) ||
           (request.method === 'PATCH' && !!route[2]) ||
@@ -457,7 +489,7 @@ export async function pausedSearchCampaigns(
       catch { throw new CampaignError('google_ads_invalid_json', 400); }
       payload = request.method === 'POST' ? parseCreate(body) : parseUpdate(body);
     }
-    const client = await GoogleAdsClient.connect(env);
+    client = await GoogleAdsClient.connect(env);
     const account = await client.account(route[1]);
     if (account.manager) throw new CampaignError('google_ads_manager_campaign_write_denied', 409);
     let result: object;
@@ -476,7 +508,7 @@ export async function pausedSearchCampaigns(
     if (error instanceof CampaignError || error instanceof GoogleAdsError) {
       return Response.json({
         error: error.code,
-        request_id: error.requestId,
+        request_id: error.requestId ?? client?.responseRequestId ?? null,
         ...(error instanceof CampaignError && error.write ? {
           status: 'write_unverified', ...error.write, paid_delivery_authorized: false,
         } : {}),

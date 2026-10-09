@@ -115,6 +115,9 @@ function accountFrom(value: Record<string, unknown>, loginId: string | null): Ac
 export class GoogleAdsClient {
   private directCustomers?: Set<string>;
   private discoveredAccounts?: Account[];
+  private lastRequestId: string | null = null;
+
+  get responseRequestId(): string | null { return this.lastRequestId; }
 
   private constructor(
     private readonly env: GoogleAdsConfig,
@@ -161,6 +164,7 @@ export class GoogleAdsClient {
   }
 
   async request(path: string, body?: Record<string, unknown>, loginId?: string | null): Promise<unknown> {
+    this.lastRequestId = null;
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
       'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
@@ -179,6 +183,7 @@ export class GoogleAdsClient {
     } catch {
       throw new GoogleAdsError('google_ads_network_unavailable', 503);
     }
+    this.lastRequestId = response.headers.get('request-id');
     if (!response.ok) {
       const requestId = response.headers.get('request-id');
       if (response.status === 429 || response.status === 503) {
