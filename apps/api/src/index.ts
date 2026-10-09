@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { pausedSearchCampaigns } from "./google-campaigns";
+import { handleMetaRequest } from "./meta";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -28,6 +29,7 @@ export interface Env extends GoogleAdsConfig {
   BUNNY_PULL_ZONE_ID: string;
   BUNNY_COLLECT_HOST: string;
   BUNNY_SIGNING_KEY: string;
+  META_ACCESS_TOKEN?: string;
 }
 
 const kinds: Kind[] = ["subscription_receipt", "subscription_refund", "ad_spend", "ad_credit"];
@@ -517,6 +519,9 @@ export default {
         }
         throw error;
       }
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/v1/meta/")) {
+      return handleMetaRequest(url, env.META_ACCESS_TOKEN);
     }
     if (request.method === "POST" && url.pathname === "/v1/bunny/poll") {
       try {

@@ -80,7 +80,11 @@ function native(values: {
   return mocked;
 }
 
-beforeEach(async () => { await reset(); });
+beforeEach(async (context) => {
+  console.info('Google reconciliation reset begin:', context.task.name);
+  await reset();
+  console.info('Google reconciliation reset complete:', context.task.name);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 it('imports a source-reconciled daily campaign exactly once alongside subscription receipts', async () => {
