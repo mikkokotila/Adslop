@@ -158,7 +158,7 @@ export class GoogleAdsClient {
     return new GoogleAdsClient(env, textField(object(reply).access_token));
   }
 
-  async request(path: string, body?: Record<string, string>, loginId?: string | null): Promise<unknown> {
+  async request(path: string, body?: Record<string, unknown>, loginId?: string | null): Promise<unknown> {
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
       'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
