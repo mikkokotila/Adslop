@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
-import { reset } from "cloudflare:test";
+import { reset, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import worker, { type Env } from "../src/index";
+import worker, { MoneyLedger, type Env } from "../src/index";
 import type { BunnyLog } from "../src/bunny";
 
 const endpoint = "https://adslop.test";
@@ -347,47 +347,46 @@ it("preserves the page cursor when Bunny retention advances during a backlog", a
   }
 });
 
-it("serializes overlapping polls and keeps the durable page cursor monotonic", async () => {
-  const first = await signedLog("55555555555555555555555555555555", "overlap-cash", "19");
-  let notifyStarted!: () => void;
-  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
-  let unblock!: () => void;
-  const hold = new Promise<void>((resolve) => { unblock = resolve; });
-  const offsets: number[] = [];
-  let firstFetch = true;
-  vi.stubGlobal("fetch", vi.fn(async (request: URL | RequestInfo) => {
-    const url = new URL(String(request));
-    const offset = Number(url.searchParams.get("offset"));
-    offsets.push(offset);
-    if (firstFetch) {
-      firstFetch = false;
+it("rejects overlapping polls without cross-context I/O sharing", async () => {
+  const stub = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+  const result = await runInDurableObject(stub, async (instance: MoneyLedger) => {
+    // Keep the concurrency test entirely inside the Durable Object context.
+    // Network/body mocks crossing separate request contexts are forbidden by workerd.
+    const ledger = instance as unknown as {
+      pollBunnyOnce: (now: number) => Promise<{
+        from: number; to: number; scanned: number; admitted: number;
+        duplicate: number; rejected: number; seen: number; complete: boolean;
+      }>;
+    };
+    const original = ledger.pollBunnyOnce;
+    let notifyStarted!: () => void;
+    const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    ledger.pollBunnyOnce = async () => {
+      calls++;
       notifyStarted();
-      await hold;
+      await held;
+      return {
+        from: 0, to: 1, scanned: 0, admitted: 0,
+        duplicate: 0, rejected: 0, seen: 0, complete: true,
+      };
+    };
+    try {
+      const first = instance.pollBunny(123);
+      await started;
+      const concurrent = await instance.pollBunny(124);
+      release();
+      const completed = await first;
+      return { calls, concurrent, completed };
+    } finally {
+      ledger.pollBunnyOnce = original;
     }
-    return Response.json({
-      data: [{ ...first, requestId: offset.toString(16).padStart(32, "0") }],
-      pagination: { offset, limit: 1000, returned: 1, hasMore: offset < 20000 },
-    });
-  }));
-  const a = poll();
-  await started;
-  const concurrentResponse = await poll();
-  expect(concurrentResponse.status).toBe(200);
-  expect(await concurrentResponse.json()).toMatchObject({
+  });
+  expect(result.calls).toBe(1);
+  expect(result.concurrent).toMatchObject({
     status: "already_running", complete: false,
   });
-  expect(offsets).toEqual([0]);
-  unblock();
-  const firstResponse = await a;
-  expect(firstResponse.status).toBe(200);
-  expect(await firstResponse.json()).toMatchObject({
-    complete: false, next_offset: 20000, admitted: 1,
-  });
-  expect(offsets).toHaveLength(20);
-  expect(await (await poll()).json()).toMatchObject({
-    complete: true, scanned: 1,
-  });
-  expect(offsets).toHaveLength(21);
-  expect(offsets[20]).toBe(20000);
-  expect(await money()).toMatchObject({ subscription_revenue_minor: 19 });
+  expect(result.completed).toMatchObject({ from: 0, to: 1, complete: true });
 });
