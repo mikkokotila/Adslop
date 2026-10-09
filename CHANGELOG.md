@@ -1,8 +1,14 @@
-# v0.4.0
+# v0.4.1
 
 - Add read-only Google Ads OAuth authentication, account discovery, native campaign and keyword inventory, and dated spend reporting.
 - Preserve account currencies, time zones and exact micro-unit evidence across paginated campaign, keyword and creative views.
 - Report expired credentials, incomplete pages and quota limits without inventing commercial values.
+
+# v0.4.0
+
+- Add authenticated read-only Meta account discovery and daily spend reports.
+- Preserve exact currency minor units, independent reporting dimensions and source evidence.
+- Reject incomplete or unsafe upstream pagination without changing recorded cash.
 
 # v0.3.1
 
