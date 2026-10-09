@@ -1,3 +1,9 @@
+# v0.4.0
+
+- Add authenticated read-only Meta account discovery and daily spend reports.
+- Preserve exact currency minor units, independent reporting dimensions and source evidence.
+- Reject incomplete or unsafe upstream pagination without changing recorded cash.
+
 # v0.3.1
 
 - Stop waiting for quota-exhausted advisory Copilot review during PR delivery.
