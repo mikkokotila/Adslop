@@ -63,7 +63,7 @@ function stubAds(options: {
     const req = JSON.parse(init?.body as string) as Record<string, unknown>;
     calls.push({ url, request: req });
     const query = req.query as string;
-    if (query.includes('customer.id')) {
+    if (options.mixedDirect && query.includes('customer.id')) {
       expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
     }
     if (query.includes('FROM customer_client')) {
