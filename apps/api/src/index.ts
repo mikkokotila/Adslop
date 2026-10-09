@@ -364,7 +364,9 @@ export class MoneyLedger extends DurableObject<Env> {
     const fractionDigits = new Intl.NumberFormat("en", {
       style: "currency", currency,
     }).resolvedOptions().maximumFractionDigits;
-    if (fractionDigits > 6) throw new Error("unsupported_currency_fraction_digits");
+    if (fractionDigits === undefined || fractionDigits > 6) {
+      throw new Error("unsupported_currency_fraction_digits");
+    }
     const microsPerMinor = 10n ** BigInt(6 - fractionDigits);
     const googleRows = new GoogleCostJournal(this.ctx.storage.sql).latest(product, currency);
     const importedMicros = googleRows.reduce(

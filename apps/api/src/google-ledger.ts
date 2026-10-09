@@ -12,11 +12,13 @@ export interface GoogleSpendReport {
   account_spend_micros: string;
   view: string;
   breakdown_spend_micros: string;
+  undistributed_micros: string;
   complete: boolean;
   rows: Record<string, unknown>[];
 }
 
 interface Revision {
+  [key: string]: string | number;
   customer_id: string;
   campaign_id: string;
   local_date: string;
