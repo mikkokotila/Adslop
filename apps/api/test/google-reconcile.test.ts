@@ -222,23 +222,30 @@ it.each(['2026-99-08', '2026-02-30'])('rejects invalid source date %s atomically
 });
 
 it('rejects overlapping acquisition before it can append an out-of-order cost revision', async () => {
-  let enter!: () => void;
-  let resume!: () => void;
-  const entered = new Promise<void>((resolve) => { enter = resolve; });
-  const paused = new Promise<void>((resolve) => { resume = resolve; });
-  let held = false;
+  let entered = false;
+  let released = false;
   const mock = native({ beforeCampaign: async () => {
-    if (held) return;
-    held = true;
-    enter();
-    await paused;
+    if (entered) return;
+    entered = true;
+    // Timer promises belong to the acquiring Durable Object's I/O context.
+    const deadline = Date.now() + 2000;
+    while (!released) {
+      if (Date.now() >= deadline) throw Error('fixture acquisition was not released');
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    }
   } });
   const first = report();
-  await entered;
-  const newer = native({ one: '2000001' });
-  const overlapping = await report();
-  resume();
-  const accepted = await first;
+  let overlapping: Response;
+  let accepted: Response;
+  let newer: ReturnType<typeof native>;
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    newer = native({ one: '2000001' });
+    overlapping = await report();
+  } finally {
+    released = true;
+    accepted = await first;
+  }
   expect(overlapping.status).toBe(409);
   expect(await overlapping.json()).toMatchObject({ error: 'google_ads_reconcile_busy' });
   expect(accepted.status).toBe(201);
