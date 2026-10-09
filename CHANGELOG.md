@@ -4,6 +4,17 @@
 - Deduplicate economic observations and expose exact money-in/money-out totals with provenance.
 - Test the real Durable Object runtime before connecting advertising and billing sources.
 
+# v0.1.4
+
+- Put subscription receipts net of refunds and chargebacks minus advertising spend net of credits at the center of marketing decisions.
+- Require the smallest demonstrable marketer outcome and one-minute Bunny collection cadence.
+- Require early non-draft PRs, frequent status checks, independently approved changes, resolved threads, and all-green CI before merging.
+
+# v0.1.3
+
+- Align disabled review restriction serialization with GitHub's live ruleset output.
+- Retain active main-branch checks, independent approvals, and no-bypass protections.
+
 # v0.1.2
 
 - Clarify URL-parameter events collected through Bunny access logs at an approximately five-minute cadence.
