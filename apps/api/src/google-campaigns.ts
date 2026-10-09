@@ -37,6 +37,19 @@ class CampaignError extends Error {
   }
 }
 
+function failedWrite(error: unknown, identity: WriteIdentity, acknowledged: boolean): never {
+  const uncertain = error instanceof GoogleAdsError && (
+    error.code === 'google_ads_network_unavailable' ||
+    error.code === 'google_ads_invalid_response' ||
+    (error.responseStatus !== null && error.responseStatus >= 500)
+  );
+  if ((acknowledged || uncertain) &&
+      (error instanceof CampaignError || error instanceof GoogleAdsError)) {
+    throw new CampaignError(error.code, error.status, identity, error.requestId);
+  }
+  throw error;
+}
+
 function asObject(v: unknown, code = 'google_ads_invalid_native_response'): Native {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new CampaignError(code, 502);
   return v as Native;
@@ -328,12 +341,14 @@ async function create(
       },
     } } },
   ];
-  const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
-    mutateOperations: operations, partialFailure: false,
-    responseContentType: 'RESOURCE_NAME_ONLY',
-  }, loginCustomerId);
   const identity: WriteIdentity = { customer_id: customer };
+  let acknowledged = false;
   try {
+    const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
+      mutateOperations: operations, partialFailure: false,
+      responseContentType: 'RESOURCE_NAME_ONLY',
+    }, loginCustomerId);
+    acknowledged = true;
     const campaignName = mutatedResource(response, 1, 'campaign');
     identity.campaign_resource_name = campaignName;
     const campaignId = googleResource(customer, 'campaigns', campaignName);
@@ -357,10 +372,7 @@ async function create(
     return { status: 'verified_paused', ...identity,
       native: actual, paid_delivery_authorized: false };
   } catch (error) {
-    if (error instanceof CampaignError || error instanceof GoogleAdsError) {
-      throw new CampaignError(error.code, error.status, identity, error.requestId);
-    }
-    throw error;
+    failedWrite(error, identity, acknowledged);
   }
 }
 
@@ -391,16 +403,18 @@ async function update(
       updateMask: 'amount_micros',
     } });
   }
-  const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
-    mutateOperations: operations, partialFailure: false,
-    responseContentType: 'RESOURCE_NAME_ONLY',
-  }, loginCustomerId);
   const identity: WriteIdentity = {
     customer_id: customer, campaign_id: campaignId,
     campaign_resource_name: 'customers/' + customer + '/campaigns/' + campaignId,
     budget_resource_name: budgetName,
   };
+  let acknowledged = false;
   try {
+    const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
+      mutateOperations: operations, partialFailure: false,
+      responseContentType: 'RESOURCE_NAME_ONLY',
+    }, loginCustomerId);
+    acknowledged = true;
     if (mutatedResource(response, 0, 'campaign') !== identity.campaign_resource_name) {
       throw new CampaignError('google_ads_mutate_resource_missing', 502);
     }
@@ -418,10 +432,7 @@ async function update(
     return { status: 'verified_paused', ...identity,
       native: actual, paid_delivery_authorized: false };
   } catch (error) {
-    if (error instanceof CampaignError || error instanceof GoogleAdsError) {
-      throw new CampaignError(error.code, error.status, identity, error.requestId);
-    }
-    throw error;
+    failedWrite(error, identity, acknowledged);
   }
 }
 

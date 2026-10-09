@@ -18,6 +18,7 @@ export class GoogleAdsError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly requestId: string | null = null,
+    public readonly responseStatus: number | null = null,
   ) {
     super(code);
   }
@@ -181,20 +182,20 @@ export class GoogleAdsClient {
     if (!response.ok) {
       const requestId = response.headers.get('request-id');
       if (response.status === 429 || response.status === 503) {
-        throw new GoogleAdsError('google_ads_quota_or_service_unavailable', 503, requestId);
+        throw new GoogleAdsError('google_ads_quota_or_service_unavailable', 503, requestId, response.status);
       }
       if (response.status === 401) {
-        throw new GoogleAdsError('google_ads_reauthorization_required', 401, requestId);
+        throw new GoogleAdsError('google_ads_reauthorization_required', 401, requestId, response.status);
       }
       if (response.status === 403) {
-        throw new GoogleAdsError('google_ads_access_denied', 403, requestId);
+        throw new GoogleAdsError('google_ads_access_denied', 403, requestId, response.status);
       }
-      throw new GoogleAdsError('google_ads_request_failed', 502, requestId);
+      throw new GoogleAdsError('google_ads_request_failed', 502, requestId, response.status);
     }
     try { return await response.json(); }
     catch {
       throw new GoogleAdsError('google_ads_invalid_response', 502,
-        response.headers.get('request-id'));
+        response.headers.get('request-id'), response.status);
     }
   }
 

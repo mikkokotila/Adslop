@@ -54,10 +54,24 @@ function googleMock(options: {
   mismatch?: boolean; active?: boolean; shared?: boolean; denyMutate?: boolean;
   declarationMismatch?: boolean; readbackStatus?: number; failAfterMutation?: number;
   managed?: boolean;
+  mutateFailure?: 'network' | 'invalid_json' | 500 | 503;
+  rejectMutateStatus?: 400 | 429;
 } = {}) {
   let state: NativeState | null = null;
   let failedReadback = false;
   const mutations: Array<{ mutateOperations: Array<Record<string, any>> }> = [];
+  const mutateReply = (value: object): Response => {
+    if (options.mutateFailure && mutations.length >= (options.failAfterMutation ?? 1)) {
+      if (options.mutateFailure === 'network') throw new TypeError('connection closed after commit');
+      if (options.mutateFailure === 'invalid_json') {
+        return new Response('{', { headers: { 'request-id': 'fixture-mutate' } });
+      }
+      return Response.json({ error: 'INTERNAL' }, {
+        status: options.mutateFailure, headers: { 'request-id': 'fixture-mutate' },
+      });
+    }
+    return Response.json(value);
+  };
   const fetchMock = vi.fn(async (uri: RequestInfo | URL, init?: RequestInit) => {
     const url = String(uri);
     if (url === 'https://oauth2.googleapis.com/token') {
@@ -77,6 +91,11 @@ function googleMock(options: {
         options.managed ? manager : null,
     );
     if (url.endsWith('googleAds:mutate')) {
+      if (options.rejectMutateStatus) {
+        return Response.json({ error: 'REJECTED' }, {
+          status: options.rejectMutateStatus, headers: { 'request-id': 'fixture-rejected' },
+        });
+      }
       if (options.denyMutate) {
         return Response.json({ error: 'PERMISSION_DENIED' }, {
           status: 403, headers: { 'request-id': 'fixture-denied' },
@@ -122,7 +141,7 @@ function googleMock(options: {
               },
             } } },
         };
-        return Response.json({ mutateOperationResponses: [
+        return mutateReply({ mutateOperationResponses: [
           { campaignBudgetResult: { resourceName: prefix + 'campaignBudgets/510' } },
           { campaignResult: { resourceName: prefix + 'campaigns/610' } },
           { adGroupResult: { resourceName: prefix + 'adGroups/710' } },
@@ -141,7 +160,7 @@ function googleMock(options: {
       if (ops[1]?.campaignBudgetOperation) {
         state.budget.amountMicros = ops[1].campaignBudgetOperation.update.amountMicros;
       }
-      return Response.json({ mutateOperationResponses: [
+      return mutateReply({ mutateOperationResponses: [
         { campaignResult: { resourceName: prefix + 'campaigns/610' } },
         ...(ops.length > 1 ? [
           { campaignBudgetResult: { resourceName: prefix + 'campaignBudgets/510' } },
@@ -298,6 +317,58 @@ it.each([429, 503])('preserves created resources after a %i readback failure wit
   expect(recovered.status).toBe(200);
   expect(await recovered.json()).toMatchObject({ status: 'verified_paused', campaign_id: '610' });
   expect(google.mutations).toHaveLength(1);
+});
+
+const ambiguousMutations = [
+  { failure: 'network', status: 503, error: 'google_ads_network_unavailable', requestId: null },
+  { failure: 'invalid_json', status: 502, error: 'google_ads_invalid_response', requestId: 'fixture-mutate' },
+  { failure: 500, status: 502, error: 'google_ads_request_failed', requestId: 'fixture-mutate' },
+  { failure: 503, status: 503, error: 'google_ads_quota_or_service_unavailable', requestId: 'fixture-mutate' },
+] as const;
+
+it.each(ambiguousMutations)('marks create outcome unknown after $failure without inventing IDs or retrying', async ({ failure, status, error, requestId }) => {
+  const google = googleMock({ mutateFailure: failure });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(status);
+  expect(await reply.json()).toEqual({
+    error, request_id: requestId, status: 'write_unverified',
+    customer_id: customer, paid_delivery_authorized: false,
+  });
+  expect(google.mutations).toHaveLength(1);
+  const stored = await call('GET', '/paused-search-campaigns/610');
+  expect(stored.status).toBe(200);
+  expect(await stored.json()).toMatchObject({ status: 'verified_paused', campaign_id: '610' });
+  expect(google.mutations).toHaveLength(1);
+});
+
+it.each(ambiguousMutations)('preserves update identity after $failure without retrying', async ({ failure, status, error, requestId }) => {
+  const google = googleMock({ mutateFailure: failure, failAfterMutation: 2 });
+  expect((await call('POST', '/paused-search-campaigns', config)).status).toBe(201);
+  const reply = await call('PATCH', '/paused-search-campaigns/610', {
+    daily_budget_micros: '11000000',
+  });
+  expect(reply.status).toBe(status);
+  expect(await reply.json()).toEqual({
+    error, request_id: requestId, status: 'write_unverified', customer_id: customer,
+    campaign_id: '610', campaign_resource_name: 'customers/' + customer + '/campaigns/610',
+    budget_resource_name: 'customers/' + customer + '/campaignBudgets/510',
+    paid_delivery_authorized: false,
+  });
+  const stored = await call('GET', '/paused-search-campaigns/610');
+  expect(stored.status).toBe(200);
+  expect(await stored.json()).toMatchObject({ native: { budget: { amountMicros: '11000000' } } });
+  expect(google.mutations).toHaveLength(2);
+});
+
+it.each([
+  { nativeStatus: 400, status: 502, error: 'google_ads_request_failed' },
+  { nativeStatus: 429, status: 503, error: 'google_ads_quota_or_service_unavailable' },
+] as const)('keeps explicit HTTP $nativeStatus rejection distinct from an uncertain write', async ({ nativeStatus, status, error }) => {
+  const google = googleMock({ rejectMutateStatus: nativeStatus });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(status);
+  expect(await reply.json()).toEqual({ error, request_id: 'fixture-rejected' });
+  expect(google.mutations).toHaveLength(0);
 });
 
 it('preserves update identity when readback fails after the second acknowledged mutation', async () => {
