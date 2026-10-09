@@ -43,6 +43,10 @@ function native(values: {
       return Response.json({ access_token: 'fixture-token' });
     }
     expect(new Headers(options?.headers).get('developer-token')).toBe('fixture-developer');
+    expect(new Headers(options?.headers).get('login-customer-id')).toBeNull();
+    if (url.endsWith('/customers:listAccessibleCustomers')) {
+      return Response.json({ resourceNames: ['customers/' + customer] });
+    }
     const request = JSON.parse(options?.body as string) as { query: string };
     if (request.query.includes('customer.id')) {
       return Response.json({ results: [{
@@ -234,7 +238,7 @@ it('rejects overlapping acquisition before it can append an out-of-order cost re
   expect(overlapping.status).toBe(409);
   expect(await overlapping.json()).toMatchObject({ error: 'google_ads_reconcile_busy' });
   expect(accepted.status).toBe(201);
-  expect(mock).toHaveBeenCalledTimes(4);
+  expect(mock).toHaveBeenCalledTimes(5);
   expect(newer).not.toHaveBeenCalled();
   expect(await (await history()).json()).toMatchObject({ revisions: [
     { revision: 1, cost_micros: '1000001' },
