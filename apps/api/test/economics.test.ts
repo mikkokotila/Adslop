@@ -80,8 +80,15 @@ it("rejects unauthenticated, ambiguous, and invalid monetary requests", async ()
   expect((await send("/v1/economics?product_id=anything&currency=EUR", undefined, false)).status).toBe(401);
   expect((await send("/v1/observations", observation("invalid-test", "e1", "ad_spend", 0, "google"))).status).toBe(400);
   expect((await send("/v1/observations", observation("invalid-test", "e1", "ad_spend", 100, null))).status).toBe(400);
+  expect((await send("/v1/observations", { ...observation("invalid-test", "e1", "ad_spend", 100, "google"), channel: ["google"] })).status).toBe(400);
+  expect((await send("/v1/observations", observation("invalid-test", ".", "subscription_receipt", 100, null))).status).toBe(400);
+  expect((await send("/v1/observations", observation("invalid-test", "..", "subscription_receipt", 100, null))).status).toBe(400);
   expect((await send("/v1/observations", { ...observation("invalid-test", "e1", "subscription_receipt", 100, null), email: "example@example.com" })).status).toBe(400);
   expect((await send("/v1/economics?product_id=anything&currency=INVALID")).status).toBe(400);
+  const nearToken = await worker.fetch(new Request(base + "/v1/economics?product_id=anything&currency=EUR", {
+    headers: { Authorization: "Bearer test-only-economic-ledgeq" },
+  }), env as Env);
+  expect(nearToken.status).toBe(401);
 });
 
 it("keeps product and currency data separate", async () => {

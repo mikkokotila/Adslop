@@ -23,7 +23,7 @@ const kinds: Kind[] = ["subscription_receipt", "subscription_refund", "ad_spend"
 const fields = ["product_id", "source", "event_id", "kind", "amount_minor", "currency", "channel", "occurred_at"];
 
 function validId(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
+  return typeof value === "string" && value !== "." && value !== ".." && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
 }
 
 function parseObservation(input: unknown): Observation {
@@ -41,7 +41,7 @@ function parseObservation(input: unknown): Observation {
     throw new Error("invalid_currency");
   }
   const isAd = row.kind === "ad_spend" || row.kind === "ad_credit";
-  if (isAd ? !["google", "meta"].includes(String(row.channel)) : row.channel !== null) {
+  if (isAd ? row.channel !== "google" && row.channel !== "meta" : row.channel !== null) {
     throw new Error("invalid_channel");
   }
   if (typeof row.occurred_at !== "string" || !Number.isFinite(Date.parse(row.occurred_at))) {
@@ -146,6 +146,18 @@ export class MoneyLedger extends DurableObject<Env> {
   }
 }
 
+async function authorized(header: string | null, token: string): Promise<boolean> {
+  const encode = new TextEncoder();
+  const [given, expected] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encode.encode(header ?? "")),
+    crypto.subtle.digest("SHA-256", encode.encode(`Bearer ${token}`)),
+  ]);
+  const left = new Uint8Array(given), right = new Uint8Array(expected);
+  let mismatch = 0;
+  for (let i = 0; i < left.length; i++) mismatch |= left[i] ^ right[i];
+  return mismatch === 0;
+}
+
 function response(error: string, status: number): Response {
   return Response.json({ error }, { status });
 }
@@ -153,7 +165,7 @@ function response(error: string, status: number): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!env.API_TOKEN) return response("api_token_not_configured", 503);
-    if (request.headers.get("Authorization") !== `Bearer ${env.API_TOKEN}`) {
+    if (!await authorized(request.headers.get("Authorization"), env.API_TOKEN)) {
       return response("unauthorized", 401);
     }
     const url = new URL(request.url);
