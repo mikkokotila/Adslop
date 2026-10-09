@@ -206,6 +206,9 @@ export class GoogleCostJournal {
         throw new GoogleJournalError('google_ads_missing_prior_source_row', 409);
       }
     }
+    if (inserted + corrected + duplicates === 0) {
+      throw new GoogleJournalError('google_ads_no_selected_campaign_cost_rows', 409);
+    }
     return {
       customer_id: report.customer_id, product_id: product,
       currency: report.currency, time_zone: report.time_zone,
