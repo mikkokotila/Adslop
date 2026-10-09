@@ -39,9 +39,9 @@ The engineering consequence is to distinguish desired allocation, authorized exp
 
 ## A transparent optimization method
 
-The proposed default is constrained marginal-profit allocation over a declared forward horizon. The economic policy in the specification determines which net revenue, fees, refunds, costs, and currency conversions enter contribution profit.
+The proposed default is constrained marginal net-cash allocation over a declared forward horizon. The first-release economic objective is subscription receipts net of refunds and chargebacks minus advertising spend net of credits. Fees and variable costs are optional, separately labeled extensions, not competing default objectives.
 
-For a native allocation unit, estimate contribution before media cost as a function of the next budget allocation. A piecewise-linear concave response curve permits a linear-program formulation with explicit bounds. Maximize the sum of conservative contribution less media spend and a declared penalty for unnecessary changes. Shared constraints include the remaining authorized envelope, pacing, platform bounds, native increments, fixed experimental commitments, and change limits.
+For a native allocation unit, estimate expected net subscription receipts before media cost as a function of the next budget allocation. A piecewise-linear concave response curve permits a linear-program formulation with explicit bounds. Maximize the sum of conservative expected net subscription receipts less media spend and a declared penalty for unnecessary changes. Shared constraints include the remaining authorized envelope, pacing, platform bounds, native increments, fixed experimental commitments, and change limits.
 
 This is an application of established constrained resource allocation. It is optimal only for its input model and assumptions. The [resource-allocation literature][resource-allocation] supports the mathematical approach, not an empirical claim about future Adslop revenue. Concavity and separability require justification within the local spend range. When evidence cannot justify a response estimate, use a bounded collection phase or restrict the change; do not manufacture a curve.
 

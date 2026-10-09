@@ -3,8 +3,8 @@
 ## The only needle: subscription revenue versus advertising spend
 
 Adslop is a **precision instrument for a marketer**, not a developer showcase.
-The primary result is **subscription money received (net of refunds) minus
-advertising money spent**, measured by product, channel, campaign, keyword,
+The primary result is **subscription money received (net of refunds and chargebacks) minus
+advertising money spent (net of credits)**, measured by product, channel, campaign, keyword,
 and creative where the evidence supports it. Report the two monetary inputs,
 their difference, and the evidence and time window. Do not replace collected
 money with estimated lifetime value, attributed claims, or vanity metrics.
