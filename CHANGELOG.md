@@ -4,6 +4,7 @@
 - Read back native campaign, budget, keyword and creative state before declaring a write verified.
 - Restrict existing paused-campaign updates to name and non-shared budget; reject active campaigns and paid delivery activation.
 - Require an explicit non-political advertiser declaration and preserve native resource identities when acknowledged writes cannot be verified.
+- Route paused campaign mutations through the resolved direct or manager account context.
 
 # v0.5.0
 

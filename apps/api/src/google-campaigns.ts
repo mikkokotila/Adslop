@@ -287,7 +287,9 @@ function verifyCreate(
   if (failures.some(Boolean)) throw new CampaignError('google_ads_write_readback_mismatch', 409);
 }
 
-async function create(client: GoogleAdsClient, customer: string, config: CreateSearch): Promise<object> {
+async function create(
+  client: GoogleAdsClient, customer: string, config: CreateSearch, loginCustomerId: string | null,
+): Promise<object> {
   const prefix = 'customers/' + customer + '/';
   const budget = prefix + 'campaignBudgets/-1';
   const campaign = prefix + 'campaigns/-2';
@@ -329,7 +331,7 @@ async function create(client: GoogleAdsClient, customer: string, config: CreateS
   const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
     mutateOperations: operations, partialFailure: false,
     responseContentType: 'RESOURCE_NAME_ONLY',
-  });
+  }, loginCustomerId);
   const identity: WriteIdentity = { customer_id: customer };
   try {
     const campaignName = mutatedResource(response, 1, 'campaign');
@@ -364,6 +366,7 @@ async function create(client: GoogleAdsClient, customer: string, config: CreateS
 
 async function update(
   client: GoogleAdsClient, customer: string, campaignId: string, config: UpdateSearch,
+  loginCustomerId: string | null,
 ): Promise<object> {
   const existing = await snapshot(client, customer, campaignId);
   ensurePaused(existing);
@@ -391,7 +394,7 @@ async function update(
   const response = await client.request('/customers/' + customer + '/googleAds:mutate', {
     mutateOperations: operations, partialFailure: false,
     responseContentType: 'RESOURCE_NAME_ONLY',
-  });
+  }, loginCustomerId);
   const identity: WriteIdentity = {
     customer_id: customer, campaign_id: campaignId,
     campaign_resource_name: 'customers/' + customer + '/campaigns/' + campaignId,
@@ -448,9 +451,9 @@ export async function pausedSearchCampaigns(
     if (account.manager) throw new CampaignError('google_ads_manager_campaign_write_denied', 409);
     let result: object;
     if (request.method === 'POST') {
-      result = await create(client, route[1], payload as CreateSearch);
+      result = await create(client, route[1], payload as CreateSearch, account.login_customer_id);
     } else if (request.method === 'PATCH') {
-      result = await update(client, route[1], route[2], payload as UpdateSearch);
+      result = await update(client, route[1], route[2], payload as UpdateSearch, account.login_customer_id);
     } else {
       const actual = await snapshot(client, route[1], route[2]);
       ensurePaused(actual);

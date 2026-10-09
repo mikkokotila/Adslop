@@ -5,6 +5,7 @@ import worker, { type Env } from '../src/index';
 import readme from '../../../README.md?raw';
 
 const customer = '1234567890';
+const manager = '9876543210';
 const root = 'https://adslop.test/v1/google-ads/accounts/' + customer;
 const credentials = {
   GOOGLE_ADS_CLIENT_ID: 'fixture-client',
@@ -24,11 +25,13 @@ const config = {
   final_url: 'https://example.org/landing',
 };
 
-async function call(method: string, path = '/paused-search-campaigns', body?: object): Promise<Response> {
+async function call(
+  method: string, path = '/paused-search-campaigns', body?: object, bindings: Partial<Env> = {},
+): Promise<Response> {
   return worker.fetch(new Request(root + path, {
     method, headers: { Authorization: 'Bearer test-only-economic-ledger' },
     ...(body ? { body: JSON.stringify(body) } : {}),
-  }), { ...env, ...credentials } as Env);
+  }), { ...env, ...credentials, ...bindings } as Env);
 }
 
 type NativeState = {
@@ -42,6 +45,7 @@ type NativeState = {
 function googleMock(options: {
   mismatch?: boolean; active?: boolean; shared?: boolean; denyMutate?: boolean;
   declarationMismatch?: boolean; readbackStatus?: number; failAfterMutation?: number;
+  managed?: boolean;
 } = {}) {
   let state: NativeState | null = null;
   let failedReadback = false;
@@ -52,6 +56,13 @@ function googleMock(options: {
       return Response.json({ access_token: 'fixture-token' });
     }
     expect(new Headers(init?.headers).get('developer-token')).toBe('fixture-developer');
+    if (url.endsWith('/customers:listAccessibleCustomers')) {
+      expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
+      return Response.json({ resourceNames: options.managed
+        ? ['customers/' + manager] : ['customers/' + manager, 'customers/' + customer] });
+    }
+    expect(new Headers(init?.headers).get('login-customer-id'))
+      .toBe(options.managed ? manager : null);
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
     if (url.endsWith('googleAds:mutate')) {
       if (options.denyMutate) {
@@ -208,6 +219,37 @@ it('updates only name and a dedicated budget while retaining campaign PAUSED', a
     { campaignOperation: { updateMask: 'name,status', update: { status: 'PAUSED' } } },
     { campaignBudgetOperation: { updateMask: 'amount_micros' } },
   ]);
+});
+
+it.each([
+  { label: 'directly accessible standalone customer', managed: false, loginId: null },
+  { label: 'managed customer', managed: true, loginId: manager },
+])('routes creation, updates and readback for a $label with a configured manager', async ({ managed, loginId }) => {
+  const google = googleMock({ managed });
+  const bindings = { GOOGLE_ADS_LOGIN_CUSTOMER_ID: manager };
+  const created = await call('POST', '/paused-search-campaigns', config, bindings);
+  expect(created.status).toBe(201);
+  const updated = await call('PATCH', '/paused-search-campaigns/610', {
+    name: 'Routed paused Search campaign', daily_budget_micros: '11000000',
+  }, bindings);
+  expect(updated.status).toBe(200);
+  const readback = await call('GET', '/paused-search-campaigns/610', undefined, bindings);
+  expect(readback.status).toBe(200);
+  expect(await readback.json()).toMatchObject({
+    status: 'verified_paused', native: {
+      campaign: { name: 'Routed paused Search campaign', status: 'PAUSED' },
+      budget: { amountMicros: '11000000' },
+    },
+  });
+  const accountCalls = google.calls.mock.calls.filter(([url]) =>
+    String(url).includes('/customers/' + customer + '/googleAds:'));
+  expect(accountCalls.filter(([url]) => String(url).endsWith('googleAds:mutate'))).toHaveLength(2);
+  expect(accountCalls.filter(([url]) => String(url).endsWith('googleAds:search')).length)
+    .toBeGreaterThan(2);
+  for (const [, init] of accountCalls) {
+    expect(new Headers(init?.headers).get('login-customer-id')).toBe(loginId);
+  }
+  expect(google.mutations).toHaveLength(2);
 });
 
 it('rejects write/readback mismatches rather than reporting a verified campaign', async () => {
