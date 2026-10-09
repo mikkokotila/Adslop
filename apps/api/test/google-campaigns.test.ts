@@ -69,9 +69,13 @@ function googleMock(options: {
       return Response.json({ resourceNames: options.managed
         ? ['customers/' + manager] : ['customers/' + manager, 'customers/' + customer] });
     }
-    expect(new Headers(init?.headers).get('login-customer-id'))
-      .toBe(options.managed ? manager : null);
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+    const query = typeof body.query === 'string' ? body.query : '';
+    const managerRequest = url.includes('/customers/' + manager + '/');
+    expect(new Headers(init?.headers).get('login-customer-id')).toBe(
+      query.includes('FROM customer_client') ? manager : managerRequest ? null :
+        options.managed ? manager : null,
+    );
     if (url.endsWith('googleAds:mutate')) {
       if (options.denyMutate) {
         return Response.json({ error: 'PERMISSION_DENIED' }, {
@@ -144,10 +148,13 @@ function googleMock(options: {
         ] : []),
       ] });
     }
-    const query = body.query as string;
+    if (query.includes('FROM customer_client')) return Response.json({ results: [{
+      customerClient: { id: customer, descriptiveName: 'Fixture account',
+        currencyCode: 'EUR', timeZone: 'Europe/Helsinki', manager: false, status: 'ENABLED' },
+    }] });
     if (query.includes('customer.id')) return Response.json({ results: [{
-      customer: { id: customer, descriptiveName: 'Fixture account',
-        currencyCode: 'EUR', timeZone: 'Europe/Helsinki', manager: false },
+      customer: { id: managerRequest ? manager : customer, descriptiveName: 'Fixture account',
+        currencyCode: 'EUR', timeZone: 'Europe/Helsinki', manager: managerRequest },
     }] });
     if (!state) return Response.json({ results: [] });
     if (query.includes('FROM campaign_budget')) {
