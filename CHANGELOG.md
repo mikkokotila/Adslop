@@ -1,3 +1,8 @@
+# v0.3.1
+
+- Stop waiting for quota-exhausted advisory Copilot review during PR delivery.
+- Preserve mandatory independent human approval and all nine green CI gates.
+
 # v0.3.0
 
 - Poll Bunny access logs every minute and admit signed subscription receipts and refunds.
