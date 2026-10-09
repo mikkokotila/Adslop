@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { googleAdsRead, GoogleAdsError, type GoogleAdsConfig } from "./google";
+import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
+import { GoogleCostJournal, GoogleJournalError, type GoogleSpendReport } from "./google-ledger";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -73,6 +74,7 @@ type RecordResult = { status: "created" | "duplicate" | "conflict" };
 export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    new GoogleCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS observations (
         product_id TEXT NOT NULL,
@@ -116,6 +118,10 @@ export class MoneyLedger extends DurableObject<Env> {
   }
 
   private recordInTransaction(value: Observation): RecordResult {
+      if (value.kind === "ad_spend" && value.channel === "google" &&
+          new GoogleCostJournal(this.ctx.storage.sql).hasImportedSpend(value.product_id, value.currency)) {
+        throw new GoogleJournalError("google_ads_manual_spend_overlap", 409);
+      }
       const existing = this.ctx.storage.sql.exec<{ body: string }>(
         "SELECT body FROM observations WHERE product_id=? AND source=? AND event_id=?",
         value.product_id, value.source, value.event_id
@@ -313,6 +319,16 @@ export class MoneyLedger extends DurableObject<Env> {
       complete: false, next_offset: offset };
   }
 
+  async reconcileGoogle(product: string, report: GoogleSpendReport, campaigns: string[]): Promise<object> {
+    return this.ctx.storage.transactionSync(() =>
+      new GoogleCostJournal(this.ctx.storage.sql).apply(product, report, campaigns)
+    );
+  }
+
+  async googleHistory(customer: string): Promise<object> {
+    return { customer_id: customer, revisions: new GoogleCostJournal(this.ctx.storage.sql).history(customer) };
+  }
+
   async find(product: string, source: string, id: string): Promise<Observation | null> {
     const row = this.ctx.storage.sql.exec<{ body: string }>(
       "SELECT body FROM observations WHERE product_id=? AND source=? AND event_id=?",
@@ -345,22 +361,38 @@ export class MoneyLedger extends DurableObject<Env> {
       }
     }
     const subscriptionRevenue = receipts - refunds;
-    const advertisingSpend = spend - credits;
-    const difference = subscriptionRevenue - advertisingSpend;
+    const fractionDigits = new Intl.NumberFormat("en", {
+      style: "currency", currency,
+    }).resolvedOptions().maximumFractionDigits;
+    if (fractionDigits > 6) throw new Error("unsupported_currency_fraction_digits");
+    const microsPerMinor = 10n ** BigInt(6 - fractionDigits);
+    const googleRows = new GoogleCostJournal(this.ctx.storage.sql).latest(product, currency);
+    const importedMicros = googleRows.reduce(
+      (sum, row) => sum + BigInt(row.cost_micros), 0n
+    );
+    const advertisingMicros = (spend - credits) * microsPerMinor + importedMicros;
+    const differenceMicros = subscriptionRevenue * microsPerMinor - advertisingMicros;
     const limit = BigInt(Number.MAX_SAFE_INTEGER);
     const exact = (value: bigint): number => {
       if (value > limit || value < -limit) throw new Error("monetary_total_overflow");
       return Number(value);
     };
+    const exactMinor = (value: bigint): number | null =>
+      value % microsPerMinor === 0n ? exact(value / microsPerMinor) : null;
     return {
       product_id: product, currency,
       subscription_revenue_minor: exact(subscriptionRevenue),
-      advertising_spend_minor: exact(advertisingSpend),
-      difference_minor: exact(difference),
+      advertising_spend_minor: exactMinor(advertisingMicros),
+      difference_minor: exactMinor(differenceMicros),
+      advertising_spend_micros: advertisingMicros.toString(),
+      difference_micros: differenceMicros.toString(),
       advertising_spend_by_channel_minor: {
-        google: exact(byChannel.google), meta: exact(byChannel.meta),
+        google: exactMinor(byChannel.google * microsPerMinor + importedMicros),
+        meta: exact(byChannel.meta),
       },
-      evidence: "admitted_observations_only",
+      evidence: googleRows.length
+        ? "admitted_observations_and_google_ads_daily_revisions"
+        : "admitted_observations_only",
       attribution: "none",
       coverage: "not_verified",
     };
@@ -391,6 +423,48 @@ export default {
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    const revisions = /^\/v1\/google-ads\/accounts\/([0-9]{10})\/revisions$/.exec(url.pathname);
+    if (request.method === "GET" && revisions) {
+      return Response.json(await ledger.googleHistory(revisions[1]));
+    }
+    const reconcile = /^\/v1\/google-ads\/accounts\/([0-9]{10})\/reconcile$/.exec(url.pathname);
+    if (request.method === "POST" && reconcile) {
+      let input: unknown;
+      try { input = await request.json(); } catch { return response("invalid_json", 400); }
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        return response("google_ads_invalid_mapping", 400);
+      }
+      const form = input as Record<string, unknown>;
+      if (!validId(form.product_id) || typeof form.from !== "string" ||
+          typeof form.to !== "string" || !Array.isArray(form.campaign_ids) ||
+          form.campaign_ids.length === 0 || form.campaign_ids.some((value: unknown) =>
+            typeof value !== "string" || !/^[1-9][0-9]{0,19}$/.test(value)
+          ) || new Set(form.campaign_ids).size !== form.campaign_ids.length) {
+        return response("google_ads_invalid_mapping", 400);
+      }
+      const sourceUrl = new URL(request.url);
+      sourceUrl.searchParams.set("from", form.from);
+      sourceUrl.searchParams.set("to", form.to);
+      sourceUrl.searchParams.set("view", "campaign");
+      try {
+        const client = await GoogleAdsClient.connect(env);
+        const report = await client.spend(reconcile[1], sourceUrl);
+        const result = await ledger.reconcileGoogle(
+          form.product_id, report, form.campaign_ids as string[]
+        );
+        return Response.json(result, {
+          status: (result as { status: string }).status === "created" ? 201 : 200,
+        });
+      } catch (error) {
+        if (error instanceof GoogleJournalError || error instanceof GoogleAdsError) {
+          return Response.json({
+            error: error.code,
+            request_id: error instanceof GoogleAdsError ? error.requestId : null,
+          }, { status: error.status });
+        }
+        throw error;
+      }
+    }
     if (request.method === "GET" && url.pathname.startsWith("/v1/google-ads/")) {
       try {
         return await googleAdsRead(url, env);
@@ -432,7 +506,13 @@ export default {
         if (error instanceof Error) return response(error.message, 400);
         throw error;
       }
-      const result = await ledger.record(value);
+      let result: RecordResult;
+      try {
+        result = await ledger.record(value);
+      } catch (error) {
+        if (error instanceof GoogleJournalError) return response(error.code, error.status);
+        throw error;
+      }
       if (result.status === "conflict") return response("conflicting_event_id", 409);
       return Response.json({ ...result, event_id: value.event_id }, {
         status: result.status === "created" ? 201 : 200,
