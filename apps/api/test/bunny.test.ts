@@ -348,7 +348,7 @@ it("preserves the page cursor when Bunny retention advances during a backlog", a
 });
 
 it("rejects overlapping polls without cross-context I/O sharing", async () => {
-  const stub = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+  const stub = (env as Env).MONEY.get((env as Env).MONEY.idFromName("private-operator"));
   const result = await runInDurableObject(stub, async (instance: MoneyLedger) => {
     // Keep the concurrency test entirely inside the Durable Object context.
     // Network/body mocks crossing separate request contexts are forbidden by workerd.
