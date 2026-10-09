@@ -2,6 +2,7 @@
   "name": "adslop-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-09",
+  "triggers": { "crons": ["* * * * *"] },
   "durable_objects": {
     "bindings": [{ "name": "MONEY", "class_name": "MoneyLedger" }]
   },
