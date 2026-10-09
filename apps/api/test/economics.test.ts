@@ -150,3 +150,13 @@ it("nets receipts precisely even when gross receipts exceed safe Number precisio
     advertising_spend_minor: 0,
   });
 });
+
+it("retrieves an admitted event when its path identifier is URL-encoded", async () => {
+  const value = observation("encoded-path-test", "invoice:123", "subscription_receipt", 543, null);
+  expect((await send("/v1/observations", value)).status).toBe(201);
+  const lookup = await send("/v1/observations/invoice%3A123?product_id=encoded-path-test&source=source-contract-test");
+  expect(lookup.status).toBe(200);
+  expect(await lookup.json()).toEqual(value);
+  expect((await send("/v1/observations/%ZZ?product_id=encoded-path-test&source=source-contract-test")).status).toBe(400);
+  expect((await send("/v1/observations/%252F?product_id=encoded-path-test&source=source-contract-test")).status).toBe(400);
+});

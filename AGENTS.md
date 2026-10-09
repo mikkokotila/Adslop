@@ -1,9 +1,81 @@
 # AGENTS.md
 
-Read **[CLAUDE.md](CLAUDE.md)** first. It is the canonical constitution for every contributor, human or agent.
+## The only needle: subscription revenue versus advertising spend
 
-Then read the tagged contributor rules in **[PR_GUIDELINE.md](PR_GUIDELINE.md)** and the Adslop scope in **[REPO_SPECIFICS.md](REPO_SPECIFICS.md)**.
+Adslop is a **precision instrument for a marketer**, not a developer showcase.
+The primary result is **subscription money received (net of refunds and chargebacks) minus
+advertising money spent (net of credits)**, measured by product, channel, campaign, keyword,
+and creative where the evidence supports it. Report the two monetary inputs,
+their difference, and the evidence and time window. Do not replace collected
+money with estimated lifetime value, attributed claims, or vanity metrics.
 
-For governance installation or activation, read **[SETUP.md](SETUP.md)** before relying on live enforcement.
+**Every proposed change must identify the marketer's next decision it enables:**
+increase subscription receipts, stop wasted ad spend, redirect spend, or make
+the money-in/money-out measurement reliable enough to act on. If that connection
+is not concrete, do not do the work.
 
-For pull-request review, also read **[.github/copilot-instructions.md](.github/copilot-instructions.md)**, the shared semantic-review brief.
+Build the **smallest end-to-end usable increment**. Make its expected behavior
+testable, implement it, show the actual result, and stop when it passes.
+Safety, provenance, and failure recovery matter when they prevent losing money,
+double-counting money, or acting on false evidence. Do not pursue unrelated
+infrastructure, abstractions, speculative features, dashboards, reorganizations,
+documentation volume, or repeated refinement for their own sake.
+
+Spend neither developer time nor tokens producing work that does not move this
+needle. Never fabricate commercial data or claim revenue lift from a unit test.
+Distinguish operational correctness, attributed revenue, and experimentally
+demonstrated incremental revenue. A phase is complete only when its promised
+marketer capability is demonstrated; passing generic tooling alone is not enough.
+
+## Own every pull request until **every** merge gate is green
+
+**Every PR is the agent's responsibility through actual GitHub merge readiness.
+No exceptions, no handoff of routine PR monitoring to the marketer.**
+
+- **Push and open the PR immediately.** As soon as a coherent, reviewable working
+  increment exists, commit, push, and open a **non-draft** PR. Never hold a push
+  or PR for local tests, formatting, builds, or other local preparation. Remote
+  review and CI take priority; run local checks in parallel after the PR exists.
+  On each change, push promptly so the remote reflects the current candidate.
+- **Monitor one active PR every five minutes, without stopping while working.**
+  Inspect current GitHub CI runs, review decisions and inline comments,
+  unresolved review threads, merge conflicts, branch currency, and mergeability.
+  Every failure receives a technical fix, new push, and repeat verification.
+  Every review comment receives a concrete fix or substantive answer, followed
+  by an explicit **Resolve conversation** action. Verify that zero review
+  threads remain unresolved; a reply or code fix alone never counts.
+- **When working across multiple PRs, check every open PR at least once every
+  ten minutes**, and check an actively edited PR every five minutes. While one
+  PR is waiting for local tests, remote CI, or review, work on the next
+  independently useful PR. No idle waiting and no forgotten PRs.
+- **All checks, not some checks.** The candidate is not complete until **every
+  required and applicable CI workflow and job** has finished successfully on
+  the latest commit: no failures, errors, queued jobs, pending runs, unfinished
+  jobs, stuck executions, or cancellations presented as green. Inspect all
+  configured status contexts, not a selected subset. Diagnose and resolve
+  actual failures; rerun after fixes. Do not relabel a red check as acceptable,
+  mark a slice green while a dependency fails, or bypass/disable any gate.
+- **Require the actual green merge button**: the branch is current with its
+  base, conflicts are absent, the latest commit has eligible independent
+  approval, code-owner and last-push review requirements are met, every
+  conversation is resolved, and GitHub confirms the PR is mergeable. Check
+  again after the last push and before claiming merge readiness.
+- **External blockers must be named precisely and acted on immediately within
+  available authority.** Activate configured enforcement when authorized;
+  if an external entitlement, account secret, or independent human action
+  is truly necessary, identify that exact requirement. A blocked PR stays
+  **blocked**, never 'done' or 'almost green'. Keep doing other useful work
+  while actively checking the open PRs.
+
+These checks are obligations **during active work**. No contributor may claim
+unattended monitoring after the session ends unless a real monitoring service
+has been separately established and verified.
+
+## Repository law and routes
+
+Read **[CLAUDE.md](CLAUDE.md)** first for the binding repository constitution,
+then **[PR_GUIDELINE.md](PR_GUIDELINE.md)** and
+**[REPO_SPECIFICS.md](REPO_SPECIFICS.md)** for contributor and product rules.
+
+For governance installation or activation, use **[SETUP.md](SETUP.md)**.
+For pull-request review, use **[.github/copilot-instructions.md](.github/copilot-instructions.md)**.

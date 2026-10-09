@@ -439,7 +439,12 @@ export default {
     if (request.method === "GET" && url.pathname.startsWith("/v1/observations/")) {
       const product = url.searchParams.get("product_id");
       const source = url.searchParams.get("source");
-      const eventId = url.pathname.slice("/v1/observations/".length);
+      let eventId: string;
+      try {
+        eventId = decodeURIComponent(url.pathname.slice("/v1/observations/".length));
+      } catch {
+        return response("invalid_query", 400);
+      }
       if (!validId(product) || !validId(source) || !validId(eventId)) {
         return response("invalid_query", 400);
       }
