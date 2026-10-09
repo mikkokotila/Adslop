@@ -113,3 +113,21 @@ it("does not double-count simultaneous retries", async () => {
     difference_minor: 1200,
   });
 });
+
+it("keeps exact monetary totals when gross amounts exceed safe Number precision", async () => {
+  const product = "precision-test";
+  const big = Number.MAX_SAFE_INTEGER;
+  const entries = [
+    observation(product, "google-spend", "ad_spend", big, "google"),
+    observation(product, "meta-spend", "ad_spend", 2, "meta"),
+    observation(product, "google-credit", "ad_credit", big, "google"),
+  ];
+  for (const entry of entries) expect((await send("/v1/observations", entry)).status).toBe(201);
+  const response = await send("/v1/economics?product_id=precision-test&currency=EUR");
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    advertising_spend_minor: 2,
+    difference_minor: -2,
+    advertising_spend_by_channel_minor: { google: 0, meta: 2 },
+  });
+});

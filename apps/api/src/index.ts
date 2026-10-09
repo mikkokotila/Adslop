@@ -113,32 +113,38 @@ export class MoneyLedger extends DurableObject<Env> {
       "WHERE product_id=? AND currency=? GROUP BY kind, channel",
       product, currency
     ).toArray();
-    let receipts = 0, refunds = 0, spend = 0, credits = 0;
-    const byChannel = { google: 0, meta: 0 };
+    let receipts = 0n, refunds = 0n, spend = 0n, credits = 0n;
+    const byChannel = { google: 0n, meta: 0n };
     for (const row of rows) {
       if (!Number.isSafeInteger(row.total)) throw new Error("monetary_total_overflow");
-      if (row.kind === "subscription_receipt") receipts += row.total;
-      if (row.kind === "subscription_refund") refunds += row.total;
+      const amount = BigInt(row.total);
+      if (row.kind === "subscription_receipt") receipts += amount;
+      if (row.kind === "subscription_refund") refunds += amount;
       if (row.kind === "ad_spend") {
-        spend += row.total;
-        if (row.channel) byChannel[row.channel] += row.total;
+        spend += amount;
+        if (row.channel) byChannel[row.channel] += amount;
       }
       if (row.kind === "ad_credit") {
-        credits += row.total;
-        if (row.channel) byChannel[row.channel] -= row.total;
+        credits += amount;
+        if (row.channel) byChannel[row.channel] -= amount;
       }
     }
-    const subscription_revenue_minor = receipts - refunds;
-    const advertising_spend_minor = spend - credits;
-    const difference_minor = subscription_revenue_minor - advertising_spend_minor;
-    if (![subscription_revenue_minor, advertising_spend_minor, difference_minor,
-      byChannel.google, byChannel.meta].every(Number.isSafeInteger)) {
-      throw new Error("monetary_total_overflow");
-    }
+    const subscriptionRevenue = receipts - refunds;
+    const advertisingSpend = spend - credits;
+    const difference = subscriptionRevenue - advertisingSpend;
+    const limit = BigInt(Number.MAX_SAFE_INTEGER);
+    const exact = (value: bigint): number => {
+      if (value > limit || value < -limit) throw new Error("monetary_total_overflow");
+      return Number(value);
+    };
     return {
-      product_id: product, currency, subscription_revenue_minor,
-      advertising_spend_minor, difference_minor,
-      advertising_spend_by_channel_minor: byChannel,
+      product_id: product, currency,
+      subscription_revenue_minor: exact(subscriptionRevenue),
+      advertising_spend_minor: exact(advertisingSpend),
+      difference_minor: exact(difference),
+      advertising_spend_by_channel_minor: {
+        google: exact(byChannel.google), meta: exact(byChannel.meta),
+      },
       evidence: "admitted_observations_only",
       attribution: "none",
       coverage: "not_verified",
