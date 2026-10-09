@@ -1,17 +1,18 @@
-import { exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
+import worker, { type Env } from "../src/index";
 import { expect, it } from "vitest";
 
 const base = "https://adslop.test";
 const token = "Bearer test-only-economic-ledger";
 
 async function send(path: string, body?: object, authorized = true): Promise<Response> {
-  return exports.default.fetch(new Request(base + path, {
+  return worker.fetch(new Request(base + path, {
     method: body ? "POST" : "GET",
     headers: authorized
       ? { Authorization: token, "Content-Type": "application/json" }
       : { "Content-Type": "application/json" },
     ...(body && { body: JSON.stringify(body) }),
-  }));
+  }), env as Env);
 }
 
 function observation(product: string, event: string, kind: string, amount: number,
@@ -90,4 +91,18 @@ it("keeps product and currency data separate", async () => {
   expect(await otherProduct.json()).toMatchObject({ difference_minor: 0, coverage: "not_verified" });
   const otherCurrency = await send("/v1/economics?product_id=isolated-test&currency=USD");
   expect(await otherCurrency.json()).toMatchObject({ difference_minor: 0, coverage: "not_verified" });
+});
+
+it("does not double-count simultaneous retries", async () => {
+  const value = observation("concurrent-test", "receipt-1", "subscription_receipt", 1200, null);
+  const responses = await Promise.all([
+    send("/v1/observations", value),
+    send("/v1/observations", value),
+  ]);
+  expect(responses.map((item) => item.status).sort()).toEqual([200, 201]);
+  const result = await send("/v1/economics?product_id=concurrent-test&currency=EUR");
+  expect(await result.json()).toMatchObject({
+    subscription_revenue_minor: 1200,
+    difference_minor: 1200,
+  });
 });
