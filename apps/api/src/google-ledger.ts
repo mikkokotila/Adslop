@@ -52,8 +52,11 @@ function positiveMicros(value: unknown): bigint {
 
 function campaignDate(row: Record<string, unknown>): string {
   const date = record(row.segments).date;
-  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      new Date(date + 'T00:00:00.000Z').toISOString().slice(0, 10) !== date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new GoogleJournalError('google_ads_invalid_source_date', 502);
+  }
+  const parsed = new Date(date + 'T00:00:00.000Z');
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
     throw new GoogleJournalError('google_ads_invalid_source_date', 502);
   }
   return date;
@@ -160,7 +163,7 @@ export class GoogleCostJournal {
     const { entries, sourceTotal } = reportEntries(report);
     const overlap = this.sql.exec<{ present: number }>(
       "SELECT 1 AS present FROM observations WHERE product_id=? AND currency=? " +
-      "AND kind='ad_spend' AND channel='google' LIMIT 1", product, report.currency,
+      "AND kind IN ('ad_spend', 'ad_credit') AND channel='google' LIMIT 1", product, report.currency,
     ).toArray()[0];
     if (overlap) throw new GoogleJournalError('google_ads_manual_spend_overlap', 409);
     const selected = new Set(requested);

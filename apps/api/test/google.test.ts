@@ -35,6 +35,8 @@ const campaignRow = (amount: string, date = '2026-10-08') => ({
 function stubAds(options: {
   oauthFailure?: boolean; quota?: boolean; cycle?: boolean;
   mixedDirect?: boolean; adsNetworkFailure?: boolean; badJson?: boolean;
+  managerValue?: { value: unknown }; directAccounts?: number;
+  nameValue?: { value: unknown }; accessibleNames?: unknown;
 } = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
@@ -56,6 +58,13 @@ function stubAds(options: {
       });
     }
     if (url.endsWith(':listAccessibleCustomers')) {
+      if (options.accessibleNames !== undefined) {
+        return Response.json({ resourceNames: options.accessibleNames });
+      }
+      if (options.directAccounts) {
+        return Response.json({ resourceNames: Array.from({ length: options.directAccounts },
+          (_, index) => 'customers/' + String(1000000000 + index)) });
+      }
       return Response.json({ resourceNames: options.mixedDirect
         ? ['customers/' + manager, 'customers/1111111111']
         : ['customers/' + manager] });
@@ -63,8 +72,9 @@ function stubAds(options: {
     const req = JSON.parse(init?.body as string) as Record<string, unknown>;
     calls.push({ url, request: req });
     const query = req.query as string;
-    if (options.mixedDirect && query.includes('customer.id')) {
-      expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
+    if (options.mixedDirect && !query.includes('FROM customer_client')) {
+      const customerId = /customers\/(\d+)\//.exec(url)![1];
+      expect(new Headers(init?.headers).get('login-customer-id')).toBe(customerId === id ? manager : null);
     }
     if (query.includes('FROM customer_client')) {
       expect(new Headers(init?.headers).get('login-customer-id')).toBe(manager);
@@ -72,18 +82,26 @@ function stubAds(options: {
         { customerClient: {
           id: id, descriptiveName: 'Client fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: false, status: 'ENABLED',
+          ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
         { customerClient: {
           id: manager, descriptiveName: 'Manager fixture', currencyCode: 'EUR',
           timeZone: 'Europe/Helsinki', manager: true, status: 'ENABLED',
+          ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
         } },
       ] });
     }
     if (query.includes('FROM customer') && query.includes('customer.id')) {
-      return Response.json({ results: [accountInfo(
-        url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
+      const info = accountInfo(
+        options.directAccounts ? /customers\/(\d+)/.exec(url)![1] :
+          url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
         url.includes(manager),
-      )] });
+      );
+      return Response.json({ results: [{ customer: {
+        ...info.customer,
+        ...(options.managerValue ? { manager: options.managerValue.value } : {}),
+        ...(options.nameValue ? { descriptiveName: options.nameValue.value } : {}),
+      } }] });
     }
     if (query.includes('FROM customer') && query.includes('segments.date')) {
       return Response.json({ results: [
@@ -159,6 +177,62 @@ it('keeps directly accessible standalone accounts outside the configured manager
   ]);
   expect(result.accounts[0].login_customer_id).toBeNull();
   expect(result.accounts[1].login_customer_id).toBe(manager);
+  for (const customerId of ['1111111111', id]) {
+    for (const route of ['campaigns', 'keywords', 'spend?from=2026-10-08&to=2026-10-08']) {
+      const read = await get('/v1/google-ads/accounts/' + customerId + '/' + route);
+      expect(read.status).toBe(200);
+      const body = await read.json() as { account?: { login_customer_id: string | null } };
+      if (body.account) expect(body.account.login_customer_id).toBe(customerId === id ? manager : null);
+    }
+  }
+});
+
+it.each([undefined, null, ''])('reads unnamed direct and managed accounts: %s', async (value) => {
+  stubAds({ mixedDirect: true, nameValue: { value } });
+  const discovery = await get('/v1/google-ads/accounts');
+  expect(discovery.status).toBe(200);
+  const result = await discovery.json() as { accounts: Array<{ name: string | null }> };
+  expect(result.accounts.map((account) => account.name)).toEqual([null, null, null]);
+  for (const customerId of ['1111111111', id]) {
+    const response = await get('/v1/google-ads/accounts/' + customerId +
+      '/spend?from=2026-10-08&to=2026-10-08');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ account_spend_micros: '1000001' });
+  }
+});
+
+it.each([7, true, {}])('rejects populated non-string account names: %s', async (value) => {
+  stubAds({ nameValue: { value } });
+  expect((await get('/v1/google-ads/accounts')).status).toBe(502);
+});
+
+it.each(['1234567890', 'customers/123-456-7890', 'customers/1234567890/extra', 7, null])(
+  'rejects malformed accessible customer identities: %s', async (value) => {
+    stubAds({ accessibleNames: [value] });
+    const response = await get('/v1/google-ads/accounts');
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: 'google_ads_invalid_account_list' });
+  },
+);
+
+it.each([undefined, null, 'true', 0])('rejects malformed manager flags: %s', async (value) => {
+  stubAds({ managerValue: { value } });
+  const discovery = await get('/v1/google-ads/accounts');
+  expect(discovery.status).toBe(502);
+  expect(await discovery.json()).toMatchObject({ error: 'google_ads_invalid_manager_flag' });
+  const spend = await get('/v1/google-ads/accounts/' + id +
+    '/spend?from=2026-10-08&to=2026-10-08');
+  expect(spend.status).toBe(502);
+  expect(await spend.json()).toMatchObject({ error: 'google_ads_invalid_manager_flag' });
+});
+
+it('enforces the account limit for directly accessible non-manager accounts', async () => {
+  const calls = stubAds({ directAccounts: 1001 });
+  const response = await get('/v1/google-ads/accounts');
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: 'google_ads_account_limit_exceeded' });
+  expect(calls).toHaveLength(1001);
+  expect(calls.every((call) => !String(call.request.query).includes('customer_client'))).toBe(true);
 });
 
 it('converts upstream fetch and JSON failures into secret-free machine-readable errors', async () => {

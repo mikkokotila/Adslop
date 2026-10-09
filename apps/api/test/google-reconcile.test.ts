@@ -31,6 +31,7 @@ const economics = () => api('/v1/economics?product_id=' + product + '&currency=E
 
 function native(values: {
   one?: string | null; two?: string | null; override?: string; currency?: string;
+  date?: string; beforeCampaign?: () => Promise<void>;
 } = {}) {
   const first = values.one === undefined ? '1000001' : values.one;
   const second = values.two === undefined ? null : values.two;
@@ -55,9 +56,10 @@ function native(values: {
       }] });
     }
     if (request.query.includes('FROM campaign')) {
+      await values.beforeCampaign?.();
       const rows = [];
       if (first !== null) rows.push({
-        segments: { date: '2026-10-08' },
+        segments: { date: values.date ?? '2026-10-08' },
         campaign: { id: '101', name: 'Fixture Search one' },
         metrics: { costMicros: first, clicks: '2', impressions: '50' },
       });
@@ -166,11 +168,11 @@ it('does not erase previously reported expenditure when a native cost row vanish
   expect((await (await economics()).json())).toMatchObject({ advertising_spend_micros: '1000001' });
 });
 
-it('rejects overlapping manual Google spend in both source admission orders', async () => {
+it.each(['ad_spend', 'ad_credit'])('rejects overlapping manual Google %s in both admission orders', async (kind) => {
   native();
   const manual = {
     product_id: product, source: 'manual-fixture', event_id: 'overlap',
-    kind: 'ad_spend', channel: 'google', amount_minor: 200,
+    kind, channel: 'google', amount_minor: 200,
     currency: 'EUR', occurred_at: '2026-10-08T12:00:00.000Z',
   };
   expect((await api('/v1/observations', manual)).status).toBe(201);
@@ -183,6 +185,64 @@ it('rejects overlapping manual Google spend in both source admission orders', as
   const after = await api('/v1/observations', { ...manual, product_id: secondProduct });
   expect(after.status).toBe(409);
   expect(await after.json()).toMatchObject({ error: 'google_ads_manual_spend_overlap' });
+  const totals = await api('/v1/economics?product_id=' + secondProduct + '&currency=EUR');
+  expect(await totals.json()).toMatchObject({ advertising_spend_micros: '1000001' });
+});
+
+it.each(['2026-99-08', '2026-02-30'])('rejects invalid source date %s atomically and permits a retry', async (date) => {
+  native({ date });
+  const invalid = await report();
+  expect(invalid.status).toBe(502);
+  expect(await invalid.json()).toMatchObject({ error: 'google_ads_invalid_source_date' });
+  expect(await (await history()).json()).toMatchObject({ revisions: [] });
+  expect(await (await economics()).json()).toMatchObject({ advertising_spend_micros: '0' });
+  vi.unstubAllGlobals();
+  native();
+  expect((await report()).status).toBe(201);
+});
+
+it('rejects overlapping acquisition before it can append an out-of-order cost revision', async () => {
+  let enter!: () => void;
+  let resume!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const paused = new Promise<void>((resolve) => { resume = resolve; });
+  let held = false;
+  const mock = native({ beforeCampaign: async () => {
+    if (held) return;
+    held = true;
+    enter();
+    await paused;
+  } });
+  const first = report();
+  await entered;
+  const newer = native({ one: '2000001' });
+  const overlapping = await report();
+  resume();
+  const accepted = await first;
+  expect(overlapping.status).toBe(409);
+  expect(await overlapping.json()).toMatchObject({ error: 'google_ads_reconcile_busy' });
+  expect(accepted.status).toBe(201);
+  expect(mock).toHaveBeenCalledTimes(4);
+  expect(newer).not.toHaveBeenCalled();
+  expect(await (await history()).json()).toMatchObject({ revisions: [
+    { revision: 1, cost_micros: '1000001' },
+  ] });
+  expect((await report()).status).toBe(200);
+  expect(await (await economics()).json()).toMatchObject({ advertising_spend_micros: '2000001' });
+  expect(await (await history()).json()).toMatchObject({ revisions: [
+    { revision: 1, cost_micros: '1000001' }, { revision: 2, cost_micros: '2000001' },
+  ] });
+});
+
+it('preserves source error evidence across RPC and releases acquisition for retry', async () => {
+  native().mockResolvedValueOnce(new Response('', {
+    status: 503,
+  }));
+  const failed = await report();
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toMatchObject({ error: 'google_ads_oauth_unavailable', request_id: null });
+  expect(await (await history()).json()).toMatchObject({ revisions: [] });
+  expect((await report()).status).toBe(201);
 });
 
 it('does not let malformed mapping or unauthenticated requests call Google', async () => {

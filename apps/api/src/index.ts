@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
-import { GoogleCostJournal, GoogleJournalError, type GoogleSpendReport } from "./google-ledger";
+import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { pausedSearchCampaigns } from "./google-campaigns";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
@@ -119,7 +119,7 @@ export class MoneyLedger extends DurableObject<Env> {
   }
 
   private recordInTransaction(value: Observation): RecordResult {
-      if (value.kind === "ad_spend" && value.channel === "google" &&
+      if ((value.kind === "ad_spend" || value.kind === "ad_credit") && value.channel === "google" &&
           new GoogleCostJournal(this.ctx.storage.sql).hasImportedSpend(value.product_id, value.currency)) {
         throw new GoogleJournalError("google_ads_manual_spend_overlap", 409);
       }
@@ -325,17 +325,29 @@ export class MoneyLedger extends DurableObject<Env> {
       complete: false, next_offset: offset };
   }
 
-  async reconcileGoogle(product: string, report: GoogleSpendReport, campaigns: string[]): Promise<object> {
+  private googleReconcileRunning = false;
+
+  async reconcileGoogle(product: string, customer: string, sourceUrl: string,
+    campaigns: string[], config: GoogleAdsConfig): Promise<object> {
+    if (this.googleReconcileRunning) {
+      return { error: "google_ads_reconcile_busy", error_status: 409, request_id: null };
+    }
+    this.googleReconcileRunning = true;
     try {
+      const client = await GoogleAdsClient.connect(config);
+      const report = await client.spend(customer, new URL(sourceUrl));
       return this.ctx.storage.transactionSync(() =>
         new GoogleCostJournal(this.ctx.storage.sql).apply(product, report, campaigns)
       );
     } catch (error) {
       // Durable Object RPC does not preserve Error subclasses across the stub.
-      if (error instanceof GoogleJournalError) {
-        return { error: error.code, error_status: error.status };
+      if (error instanceof GoogleJournalError || error instanceof GoogleAdsError) {
+        return { error: error.code, error_status: error.status,
+          request_id: error instanceof GoogleAdsError ? error.requestId : null };
       }
       throw error;
+    } finally {
+      this.googleReconcileRunning = false;
     }
   }
 
@@ -466,14 +478,20 @@ export default {
       sourceUrl.searchParams.set("to", form.to);
       sourceUrl.searchParams.set("view", "campaign");
       try {
-        const client = await GoogleAdsClient.connect(env);
-        const report = await client.spend(reconcile[1], sourceUrl);
         const result = await ledger.reconcileGoogle(
-          form.product_id, report, form.campaign_ids as string[]
+          form.product_id, reconcile[1], sourceUrl.toString(), form.campaign_ids as string[], {
+            GOOGLE_ADS_CLIENT_ID: env.GOOGLE_ADS_CLIENT_ID,
+            GOOGLE_ADS_CLIENT_SECRET: env.GOOGLE_ADS_CLIENT_SECRET,
+            GOOGLE_ADS_REFRESH_TOKEN: env.GOOGLE_ADS_REFRESH_TOKEN,
+            GOOGLE_ADS_DEVELOPER_TOKEN: env.GOOGLE_ADS_DEVELOPER_TOKEN,
+            GOOGLE_ADS_LOGIN_CUSTOMER_ID: env.GOOGLE_ADS_LOGIN_CUSTOMER_ID,
+          }
         );
         if ("error" in result) {
-          const failure = result as unknown as { error: string; error_status: number };
-          return Response.json({ error: failure.error, request_id: null }, {
+          const failure = result as unknown as {
+            error: string; error_status: number; request_id: string | null;
+          };
+          return Response.json({ error: failure.error, request_id: failure.request_id }, {
             status: failure.error_status,
           });
         }
