@@ -1,3 +1,9 @@
+# v0.1.3
+
+- Put subscription receipts minus ad spend at the center of every marketing capability.
+- Require the smallest demonstrable marketer outcome before accepting work.
+- Set Bunny access-log polling cadence to approximately one minute.
+
 # v0.1.2
 
 - Clarify URL-parameter events collected through Bunny access logs at an approximately five-minute cadence.
