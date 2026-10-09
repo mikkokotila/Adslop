@@ -90,6 +90,9 @@ function amountMicros(row: AdsRow): bigint {
 }
 
 function accountFrom(value: Record<string, unknown>, loginId: string | null): Account {
+  if (typeof value.manager !== 'boolean') {
+    throw new GoogleAdsError('google_ads_invalid_manager_flag', 502);
+  }
   return {
     id: googleId(value.id),
     name: textField(value.descriptiveName),
@@ -232,6 +235,7 @@ export class GoogleAdsClient {
       if (!idPattern.test(id)) throw new GoogleAdsError('google_ads_invalid_account_list', 502);
       const customer = await this.account(id, null);
       accounts.set(id, customer);
+      if (accounts.size > 1000) throw new GoogleAdsError('google_ads_account_limit_exceeded', 503);
       if (!customer.manager) continue;
       const children = await this.search(id,
         'SELECT customer_client.id, customer_client.descriptive_name, ' +

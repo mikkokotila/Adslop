@@ -35,6 +35,7 @@ const campaignRow = (amount: string, date = '2026-10-08') => ({
 function stubAds(options: {
   oauthFailure?: boolean; quota?: boolean; cycle?: boolean;
   mixedDirect?: boolean; adsNetworkFailure?: boolean; badJson?: boolean;
+  managerValue?: { value: unknown }; directAccounts?: number;
 } = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
@@ -56,6 +57,10 @@ function stubAds(options: {
       });
     }
     if (url.endsWith(':listAccessibleCustomers')) {
+      if (options.directAccounts) {
+        return Response.json({ resourceNames: Array.from({ length: options.directAccounts },
+          (_, index) => 'customers/' + String(1000000000 + index)) });
+      }
       return Response.json({ resourceNames: options.mixedDirect
         ? ['customers/' + manager, 'customers/1111111111']
         : ['customers/' + manager] });
@@ -80,10 +85,15 @@ function stubAds(options: {
       ] });
     }
     if (query.includes('FROM customer') && query.includes('customer.id')) {
-      return Response.json({ results: [accountInfo(
-        url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
+      const info = accountInfo(
+        options.directAccounts ? /customers\/(\d+)/.exec(url)![1] :
+          url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
         url.includes(manager),
-      )] });
+      );
+      return Response.json({ results: [{ customer: {
+        ...info.customer,
+        ...(options.managerValue ? { manager: options.managerValue.value } : {}),
+      } }] });
     }
     if (query.includes('FROM customer') && query.includes('segments.date')) {
       return Response.json({ results: [
@@ -159,6 +169,26 @@ it('keeps directly accessible standalone accounts outside the configured manager
   ]);
   expect(result.accounts[0].login_customer_id).toBeNull();
   expect(result.accounts[1].login_customer_id).toBe(manager);
+});
+
+it.each([undefined, null, 'true', 0])('rejects malformed manager flags: %s', async (value) => {
+  stubAds({ managerValue: { value } });
+  const discovery = await get('/v1/google-ads/accounts');
+  expect(discovery.status).toBe(502);
+  expect(await discovery.json()).toMatchObject({ error: 'google_ads_invalid_manager_flag' });
+  const spend = await get('/v1/google-ads/accounts/' + id +
+    '/spend?from=2026-10-08&to=2026-10-08');
+  expect(spend.status).toBe(502);
+  expect(await spend.json()).toMatchObject({ error: 'google_ads_invalid_manager_flag' });
+});
+
+it('enforces the account limit for directly accessible non-manager accounts', async () => {
+  const calls = stubAds({ directAccounts: 1001 });
+  const response = await get('/v1/google-ads/accounts');
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: 'google_ads_account_limit_exceeded' });
+  expect(calls).toHaveLength(1001);
+  expect(calls.every((call) => !String(call.request.query).includes('customer_client'))).toBe(true);
 });
 
 it('converts upstream fetch and JSON failures into secret-free machine-readable errors', async () => {
