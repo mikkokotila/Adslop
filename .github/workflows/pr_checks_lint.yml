@@ -49,6 +49,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm --prefix docs-site run check
 
+      - name: Set up Node for the Cloudflare API
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
+        with:
+          node-version: '22'
+
+      - name: Check the economic API in the Workers runtime
+        run: |
+          corepack pnpm --dir apps/api install --frozen-lockfile
+          corepack pnpm --dir apps/api run check
+
       - name: Set up lint venv
         run: python -m venv .venv-lint
 

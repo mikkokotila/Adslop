@@ -1,3 +1,9 @@
+# v0.2.0
+
+- Record subscription cash and advertising spend through one authenticated Cloudflare API.
+- Deduplicate economic observations and expose exact money-in/money-out totals with provenance.
+- Test the real Durable Object runtime before connecting advertising and billing sources.
+
 # v0.1.2
 
 - Clarify URL-parameter events collected through Bunny access logs at an approximately five-minute cadence.
