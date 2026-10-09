@@ -30,8 +30,10 @@ The authenticated Worker API offers `GET /v1/meta/accounts` and
 `GET /v1/meta/spend?account_id=<id>&since=YYYY-MM-DD&until=YYYY-MM-DD&level=account|campaign|adset|ad`.
 The latter reports a separate account-level daily-spend baseline and a selected
 daily reporting breakdown, with exact decimal-string minor units in the ad
-account's native currency and account-local calendar. Meta's separate reporting
-levels must **never** be added to each other. A Meta Insights report is
+account's native currency and account-local calendar. The response includes
+the Meta Graph API version and observation timestamp so a later read can be
+compared with its source revision; protected financial responses are not cached.
+Meta's separate reporting levels must **never** be added to each other. A Meta Insights report is
 platform-reported spend, **not** a settled advertising invoice; nothing is
 imported into the money ledger by these read-only endpoints.
 

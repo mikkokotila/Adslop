@@ -209,16 +209,23 @@ async function dailyInsights(id: string, level: MetaLevel, token: string,
   return parseSpendRows(data, level, account, day(since), day(until));
 }
 
+function reportResponse(body: unknown, status = 200): Response {
+  return Response.json(body, {
+    status, headers: { "Cache-Control": "no-store" },
+  });
+}
+
 export async function handleMetaRequest(url: URL, accessToken: string | undefined): Promise<Response> {
-  if (!accessToken) return Response.json({ error: "meta_not_configured" }, { status: 503 });
+  if (!accessToken) return reportResponse({ error: "meta_not_configured" }, 503);
   try {
     if (url.pathname === "/v1/meta/accounts") {
       if (url.search) throw new MetaReadError("meta_invalid_query", 400);
       const data = await graphPages("me/adaccounts", {
         fields: "id,name,currency,timezone_name,account_status", limit: "100",
       }, accessToken);
-      return Response.json({
+      return reportResponse({
         accounts: data.map(parseAccount), source: "meta_graph",
+        graph_version: graphVersion, observed_at: new Date().toISOString(),
         imported_to_ledger: false,
       });
     }
@@ -245,18 +252,19 @@ export async function handleMetaRequest(url: URL, accessToken: string | undefine
       const selectedLevel = level as MetaLevel;
       const rows = selectedLevel === "account" ? accountRows :
         await dailyInsights(id, selectedLevel, accessToken, account, since, until);
-      return Response.json({
+      return reportResponse({
         account, since, until, level: selectedLevel,
+        graph_version: graphVersion, observed_at: new Date().toISOString(),
         account_spend_minor: accountRows.reduce((sum, row) => sum + BigInt(row.spend_minor), 0n).toString(),
         rows, source: "meta_insights", imported_to_ledger: false,
         reporting: "platform_reported_not_billing_settlement",
         breakdowns_additive_with_account: false,
       });
     }
-    return Response.json({ error: "not_found" }, { status: 404 });
+    return reportResponse({ error: "not_found" }, 404);
   } catch (error) {
     if (error instanceof MetaReadError) {
-      return Response.json({ error: error.code }, { status: error.status });
+      return reportResponse({ error: error.code }, error.status);
     }
     throw error;
   }

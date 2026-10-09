@@ -67,6 +67,7 @@ it("returns exact daily Meta spend without counting breakdowns twice", async () 
     "&since=2026-09-10&until=2026-09-11&level=campaign"
   ), token);
   expect(result.status).toBe(200);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
   expect(await result.json()).toMatchObject({
     account: {
       account_id: id, name: "Protocol fixture account", currency: "USD",
@@ -77,6 +78,7 @@ it("returns exact daily Meta spend without counting breakdowns twice", async () 
     rows: [{ entity_id: "777", spend_minor: "304",
       date_start: "2026-09-10", date_stop: "2026-09-10" }],
     source: "meta_insights",
+    graph_version: "v25.0", observed_at: expect.any(String),
     imported_to_ledger: false,
     breakdowns_additive_with_account: false,
     reporting: "platform_reported_not_billing_settlement",
