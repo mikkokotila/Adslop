@@ -1,8 +1,13 @@
+# v0.1.4
+
+- Put subscription receipts net of refunds and chargebacks minus advertising spend net of credits at the center of marketing decisions.
+- Require the smallest demonstrable marketer outcome and one-minute Bunny collection cadence.
+- Require early non-draft PRs, frequent status checks, independently approved changes, resolved threads, and all-green CI before merging.
+
 # v0.1.3
 
-- Put subscription receipts minus ad spend at the center of every marketing capability.
-- Require the smallest demonstrable marketer outcome before accepting work.
-- Set Bunny access-log polling cadence to approximately one minute.
+- Align disabled review restriction serialization with GitHub's live ruleset output.
+- Retain active main-branch checks, independent approvals, and no-bypass protections.
 
 # v0.1.2
 
