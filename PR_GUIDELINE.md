@@ -57,7 +57,7 @@ Specifics: product and operating boundaries live in [REPO_SPECIFICS.md](REPO_SPE
 - `[github:early-pr]` Open the PR as soon as the change is ready for CI when the repository requires early PR flow; continue local verification while CI runs.
 - `[github:review-request]` Request an authorized, eligible independent reviewer when the PR opens and after requested changes are addressed. Report missing eligibility; do not substitute self-approval or appoint an unrelated reviewer.
 - `[github:review-threads]` All review threads must be answered and resolved before merge.
-- `[github:copilot-review]` Never wait for Copilot when its quota is exhausted. Automatic review is advisory, not a substitute for eligible independent human approval or all-green required CI. Do not request, retry, or count a failed advisory bot check as green.
+- `[github:copilot-review]` If the ruleset requires automated code review, the PR must have that review completed.
 - `[github:ci]` Read failing check output and fix the named cause. If a gate is wrong, fix the gate in a separate PR.
 - `[github:ruleset]` If live branch protection must match a checked-in snapshot, reconcile out-of-band ruleset drift in its own PR.
 - `[github:merge]` Merge only after the branch is mergeable, required reviews are satisfied, all required checks are green, and required threads are resolved.
