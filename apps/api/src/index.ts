@@ -468,8 +468,9 @@ export default {
           form.product_id, report, form.campaign_ids as string[]
         );
         if ("error" in result) {
-          return Response.json({ error: result.error, request_id: null }, {
-            status: (result as { error_status: number }).error_status,
+          const failure = result as unknown as { error: string; error_status: number };
+          return Response.json({ error: failure.error, request_id: null }, {
+            status: failure.error_status,
           });
         }
         return Response.json(result, {
