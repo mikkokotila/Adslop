@@ -106,6 +106,12 @@ export class MoneyLedger extends DurableObject<Env> {
         end_ms INTEGER NOT NULL, PRIMARY KEY (zone_id, start_ms, end_ms)
       )
     `);
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS bunny_scan_cursor (
+        zone_id INTEGER PRIMARY KEY, from_ms INTEGER NOT NULL,
+        to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
+      )
+    `);
   }
 
   private recordInTransaction(value: Observation): RecordResult {
@@ -181,6 +187,26 @@ export class MoneyLedger extends DurableObject<Env> {
     };
   }
 
+  private recordBunnyGap(zoneId: number, from: number, to: number): void {
+    if (from >= to) return;
+    this.ctx.storage.transactionSync(() => {
+      const overlaps = this.ctx.storage.sql.exec<{ start_ms: number; end_ms: number }>(
+        "SELECT start_ms, end_ms FROM bunny_gaps WHERE zone_id=? " +
+        "AND end_ms>=? AND start_ms<=?",
+        zoneId, from, to
+      ).toArray();
+      const start = Math.min(from, ...overlaps.map((gap) => gap.start_ms));
+      const end = Math.max(to, ...overlaps.map((gap) => gap.end_ms));
+      this.ctx.storage.sql.exec(
+        "DELETE FROM bunny_gaps WHERE zone_id=? AND end_ms>=? AND start_ms<=?",
+        zoneId, start, end
+      );
+      this.ctx.storage.sql.exec(
+        "INSERT INTO bunny_gaps VALUES (?, ?, ?)", zoneId, start, end
+      );
+    });
+  }
+
   async pollBunny(now: number) {
     const zoneId = Number(this.env.BUNNY_PULL_ZONE_ID);
     if (!Number.isSafeInteger(zoneId) || zoneId <= 0 || !this.env.BUNNY_ACCESS_KEY ||
@@ -194,15 +220,29 @@ export class MoneyLedger extends DurableObject<Env> {
     const latest = this.ctx.storage.sql.exec<{ through_ms: number }>(
       "SELECT through_ms FROM bunny_poll_state WHERE zone_id=?", zoneId
     ).toArray()[0];
-    const to = now - 60_000;
-    const desiredFrom = latest ? latest.through_ms - 15 * 60_000 : to - 15 * 60_000;
+    const cursor = this.ctx.storage.sql.exec<{
+      from_ms: number; to_ms: number; next_offset: number;
+    }>("SELECT from_ms, to_ms, next_offset FROM bunny_scan_cursor WHERE zone_id=?",
+      zoneId).toArray()[0];
     const earliest = now - 3 * 86_400_000 + 5 * 60_000;
+    const targetTo = now - 60_000;
+    const desiredFrom = cursor?.from_ms ??
+      (latest ? latest.through_ms - 15 * 60_000 : targetTo - 15 * 60_000);
     const from = Math.max(desiredFrom, earliest);
-    if (desiredFrom < earliest) this.ctx.storage.sql.exec(
-      "INSERT OR IGNORE INTO bunny_gaps VALUES (?, ?, ?)", zoneId, desiredFrom, earliest
-    );
-    if (from >= to) return { from, to, scanned: 0, admitted: 0, duplicate: 0, rejected: 0, seen: 0 };
-    let scanned = 0, admitted = 0, duplicate = 0, rejected = 0, seen = 0, offset = 0;
+    const to = cursor && cursor.from_ms >= earliest ? cursor.to_ms : targetTo;
+    const resumeOffset = cursor && cursor.from_ms >= earliest ? cursor.next_offset : 0;
+    if (desiredFrom < earliest) {
+      this.recordBunnyGap(zoneId, desiredFrom, earliest);
+      if (cursor) this.ctx.storage.sql.exec(
+        "DELETE FROM bunny_scan_cursor WHERE zone_id=?", zoneId
+      );
+    }
+    if (from >= to) {
+      return { from, to, scanned: 0, admitted: 0, duplicate: 0,
+        rejected: 0, seen: 0, complete: true };
+    }
+    let scanned = 0, admitted = 0, duplicate = 0, rejected = 0, seen = 0;
+    let offset = resumeOffset;
     for (let pageNumber = 0; pageNumber < 20; pageNumber++) {
       const query = queryBunnyLogs(zoneId, from, to, offset);
       const reply = await fetch(query, { headers: { AccessKey: this.env.BUNNY_ACCESS_KEY } });
@@ -226,12 +266,26 @@ export class MoneyLedger extends DurableObject<Env> {
             "DO UPDATE SET through_ms=MAX(through_ms, excluded.through_ms)",
             zoneId, to
           );
+          this.ctx.storage.sql.exec(
+            "DELETE FROM bunny_scan_cursor WHERE zone_id=?", zoneId
+          );
         });
-        return { from, to, scanned, admitted, duplicate, rejected, seen };
+        return { from, to, scanned, admitted, duplicate, rejected, seen,
+          complete: true };
       }
+      if (!payload.data.length) throw new Error("bunny_empty_incomplete_page");
       offset += payload.pagination.limit;
     }
-    throw new Error("bunny_page_limit");
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        "INSERT INTO bunny_scan_cursor VALUES (?, ?, ?, ?) ON CONFLICT(zone_id) " +
+        "DO UPDATE SET from_ms=excluded.from_ms, to_ms=excluded.to_ms, " +
+        "next_offset=excluded.next_offset",
+        zoneId, from, to, offset
+      );
+    });
+    return { from, to, scanned, admitted, duplicate, rejected, seen,
+      complete: false, next_offset: offset };
   }
 
   async find(product: string, source: string, id: string): Promise<Observation | null> {

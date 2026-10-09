@@ -154,6 +154,82 @@ it("does not complete a source window when pagination fails", async () => {
   expect(failed.status).toBe(502);
   expect(await failed.json()).toEqual({ error: "bunny_fetch_failed_503" });
   expect(await money()).toMatchObject({ subscription_revenue_minor: 200 });
+  const notComplete = await worker.fetch(new Request(
+    endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+    { headers: { Authorization: authorization } }
+  ), env as Env);
+  expect(await notComplete.json()).toMatchObject({ through: null });
   const retry = await poll();
-  expect(await retry.json()).toMatchObject({ admitted: 0, seen: 1 });
+  expect(await retry.json()).toMatchObject({ admitted: 0, seen: 1, complete: true });
+  const completed = await worker.fetch(new Request(
+    endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+    { headers: { Authorization: authorization } }
+  ), env as Env);
+  expect(await completed.json()).toMatchObject({ through: expect.any(String) });
+});
+
+it("resumes after twenty pages without skipping unprocessed source records", async () => {
+  const first = await signedLog("ffffffffffffffffffffffffffffffff", "sample", "5");
+  const offsets: number[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (request: URL | RequestInfo) => {
+    const url = new URL(String(request));
+    const offset = Number(url.searchParams.get("offset"));
+    offsets.push(offset);
+    return Response.json({
+      data: [{
+        ...first,
+        requestId: offset.toString(16).padStart(32, "0"),
+        url: first.url,
+        path: first.path,
+      }],
+      pagination: {
+        offset, limit: 1000, returned: 1, hasMore: offset < 20000,
+      },
+    });
+  }));
+  const firstPoll = await poll();
+  expect(firstPoll.status).toBe(200);
+  expect(await firstPoll.json()).toMatchObject({
+    scanned: 20, admitted: 1, complete: false, next_offset: 20000,
+  });
+  const incomplete = await worker.fetch(new Request(
+    endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+    { headers: { Authorization: authorization } }
+  ), env as Env);
+  expect(await incomplete.json()).toMatchObject({ through: null });
+  const secondPoll = await poll();
+  expect(await secondPoll.json()).toMatchObject({ scanned: 1, complete: true });
+  expect(offsets).toHaveLength(21);
+  expect(offsets[20]).toBe(20000);
+  expect(await money()).toMatchObject({ subscription_revenue_minor: 5 });
+  const completed = await worker.fetch(new Request(
+    endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+    { headers: { Authorization: authorization } }
+  ), env as Env);
+  expect(await completed.json()).toMatchObject({ through: expect.any(String) });
+});
+
+it("coalesces gaps when source retention advances during poll failures", async () => {
+  vi.useFakeTimers();
+  try {
+    const start = new Date("2026-10-09T12:00:00Z");
+    vi.setSystemTime(start);
+    setLogPages([[]]);
+    expect((await poll()).status).toBe(200);
+    const later = start.getTime() + 4 * 86_400_000;
+    for (const minutes of [0, 1]) {
+      vi.setSystemTime(later + minutes * 60_000);
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("down", { status: 503 })));
+      expect((await poll()).status).toBe(502);
+    }
+    const response = await worker.fetch(new Request(
+      endpoint + "/v1/bunny/coverage?pull_zone_id=12345",
+      { headers: { Authorization: authorization } }
+    ), env as Env);
+    const report = await response.json() as { known_gaps: unknown[]; completeness: string };
+    expect(report.completeness).toBe("known_gap");
+    expect(report.known_gaps).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
