@@ -207,7 +207,22 @@ export class MoneyLedger extends DurableObject<Env> {
     });
   }
 
+  // All scheduled and manual calls for this Durable Object share one scan.
+  // A second invocation must never overwrite a cursor advanced by the first.
+  private activeBunnyPoll: ReturnType<MoneyLedger["pollBunnyOnce"]> | null = null;
+
   async pollBunny(now: number) {
+    if (this.activeBunnyPoll) return this.activeBunnyPoll;
+    const task = this.pollBunnyOnce(now);
+    this.activeBunnyPoll = task;
+    try {
+      return await task;
+    } finally {
+      if (this.activeBunnyPoll === task) this.activeBunnyPoll = null;
+    }
+  }
+
+  private async pollBunnyOnce(now: number) {
     const zoneId = Number(this.env.BUNNY_PULL_ZONE_ID);
     if (!Number.isSafeInteger(zoneId) || zoneId <= 0 || !this.env.BUNNY_ACCESS_KEY ||
         !this.env.BUNNY_SIGNING_KEY || !this.env.BUNNY_COLLECT_HOST) {

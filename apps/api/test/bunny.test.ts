@@ -346,3 +346,49 @@ it("preserves the page cursor when Bunny retention advances during a backlog", a
     vi.useRealTimers();
   }
 });
+
+it("serializes overlapping polls and keeps the durable page cursor monotonic", async () => {
+  const first = await signedLog("55555555555555555555555555555555", "overlap-cash", "19");
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  let unblock!: () => void;
+  const hold = new Promise<void>((resolve) => { unblock = resolve; });
+  const offsets: number[] = [];
+  let firstFetch = true;
+  vi.stubGlobal("fetch", vi.fn(async (request: URL | RequestInfo) => {
+    const url = new URL(String(request));
+    const offset = Number(url.searchParams.get("offset"));
+    offsets.push(offset);
+    if (firstFetch) {
+      firstFetch = false;
+      notifyStarted();
+      await hold;
+    }
+    return Response.json({
+      data: [{ ...first, requestId: offset.toString(16).padStart(32, "0") }],
+      pagination: { offset, limit: 1000, returned: 1, hasMore: offset < 20000 },
+    });
+  }));
+  const a = poll();
+  await started;
+  const b = poll();
+  await Promise.resolve();
+  expect(offsets).toEqual([0]);
+  unblock();
+  const [firstResponse, concurrentResponse] = await Promise.all([a, b]);
+  expect(firstResponse.status).toBe(200);
+  expect(concurrentResponse.status).toBe(200);
+  expect(await firstResponse.json()).toMatchObject({
+    complete: false, next_offset: 20000, admitted: 1,
+  });
+  expect(await concurrentResponse.json()).toMatchObject({
+    complete: false, next_offset: 20000, admitted: 1,
+  });
+  expect(offsets).toHaveLength(20);
+  expect(await (await poll()).json()).toMatchObject({
+    complete: true, scanned: 1,
+  });
+  expect(offsets).toHaveLength(21);
+  expect(offsets[20]).toBe(20000);
+  expect(await money()).toMatchObject({ subscription_revenue_minor: 19 });
+});
