@@ -1,3 +1,9 @@
+# v0.3.0
+
+- Poll Bunny access logs every minute and admit signed subscription receipts and refunds.
+- Preserve source request dispositions and inspectable ingestion evidence.
+- Reconcile duplicate observations and require complete pages before advancing the poll checkpoint.
+
 # v0.2.0
 
 - Record subscription cash and advertising spend through one authenticated Cloudflare API.
