@@ -33,7 +33,7 @@ Ten laws. Nine are workflow gates on every PR; the tenth is branch protection on
 
 9. **Live branch protection on `main` matches `.github/rulesets/main.json`.** Changing branch protection out-of-band (in the GitHub UI) blocks the next PR until the snapshot is updated in a PR of its own. *(pr_checks_ruleset)*
 
-10. **No direct push to `main`. No force-push. No branch deletion.** Branch must be up-to-date with `main` before merge. Require one eligible independent human approval, code-owner review on enforcement surfaces, independent approval of the latest push, and resolution of every review thread. The ruleset requests Copilot review on every push; complete that review before merge. No bypass actors. *(branch protection, server-side)*
+10. **No direct push to `main`. No force-push. No branch deletion.** Branch must be up-to-date with `main` before merge. Require one eligible independent human approval, code-owner review on enforcement surfaces, independent approval of the latest push, and resolution of every review thread. The ruleset may request advisory Copilot review, but it is not a required CI check. **Never wait for Copilot** when its quota is exhausted: do not request, retry, or block an otherwise eligible merge; independent human approval and all required CI gates remain mandatory. A failed advisory bot check must never be presented as green. No bypass actors. *(branch protection, server-side)*
 
 Beyond the gates, `audit_main_ruleset` re-checks the live ruleset on every push to `main` with a privileged token — including `bypass_actors`, which the PR-time ruleset gate (`pr_checks_ruleset`) cannot observe. It is a post-merge alarm, not a merge gate, so it carries no law of its own.
 

@@ -14,7 +14,7 @@ The adoption inspection on 8 October 2026 established the following state. Reche
 | `REPO_BOOTSTRAP_TOKEN` | Missing | The privileged activation workflow cannot administer repository settings |
 | `RULESET_AUDIT_TOKEN` | Missing | The post-merge audit cannot independently inspect the complete live ruleset |
 | Independent reviewer | `bit-mis` is appointed; the write-access invitation is pending acceptance | Verify accepted access and an independent review before merge |
-| Copilot code review | Availability unverified | The declared automated-review requirement has not been demonstrated |
+| Copilot code review | Advisory; quota exhaustion observed | Never block a PR with independent human approval and all required CI green |
 | CodeQL | Unsupported in the current private configuration | Its workflow, law, configured gate, and required context are removed together |
 
 These are activation blockers, not exceptions to the policy. The repository remains private. Do not turn a failed capability check into a successful-looking skip or add an administrative bypass to claim completion.
@@ -28,7 +28,7 @@ gh api repos/mikkokotila/Adslop/rulesets
 gh run list --repo mikkokotila/Adslop
 ```
 
-An HTTP 403 must be resolved through the appropriate account capability or permission before ruleset activation. Confirm Copilot code review is available and can perform the automatic review declared in the snapshot.
+An HTTP 403 must be resolved through the appropriate account capability or permission before ruleset activation. Copilot code review is advisory and frequently quota-exhausted; never wait for or retry it. Validate independent human approval and all required CI gates instead.
 
 Mikko Kotila (`mikkokotila`) is the project authority in `governance.yml`. He has authorized `bit-mis` as an independent reviewer and code owner, with repository write access. The account was verified as GitHub user ID `265471408`; invitation `336819527` was created on 8 October 2026 and is pending acceptance at this checkpoint. Recheck collaborator permission before requesting or counting a review. Do not copy unrelated reviewer accounts or send invitations merely to fill a template field.
 
@@ -90,7 +90,7 @@ gh api repos/mikkokotila/Adslop/rules/branches/main
 gh label list --repo mikkokotila/Adslop
 ```
 
-The successful activation must identify the real `Protect-Main` ruleset and set `RULESET_ID`. Its required status contexts must agree exactly with the enabled-and-required gates in `governance.yml` and the laws in `CLAUDE.md`. The snapshot requires no bypass actors, current branches, independent review, code-owner review on enforcement surfaces, resolved threads, and automatic Copilot review.
+The successful activation must identify the real `Protect-Main` ruleset and set `RULESET_ID`. Its required status contexts must agree exactly with the enabled-and-required gates in `governance.yml` and the laws in `CLAUDE.md`. The snapshot requires no bypass actors, current branches, independent review, code-owner review on enforcement surfaces, resolved threads, and an optional automatic Copilot review request (not a required CI context).
 
 Run and inspect the privileged audit after its prerequisites are configured:
 
@@ -129,7 +129,7 @@ Do not make the repository public as an implicit remedy for unavailable private-
 | `RULESET_ID` is absent after activation | Inspect ruleset-creation and variable-write errors; verify the actual returned ruleset identity |
 | The privileged audit cannot read `bypass_actors` | Correct the audit credential's Administration read access |
 | A required human or code-owner review is unavailable | Obtain an authorized eligible reviewer; do not self-approve or bypass the requirement |
-| Copilot review does not run | Resolve account/repository availability and the automatic-review configuration |
+| Copilot review does not run | Do not wait for, manually request, or retry the quota-exhausted advisory reviewer; require human approval and all required CI |
 | A label definition is invalid | Correct the checked-in label contract; do not delete live labels to mask the failure |
 
 

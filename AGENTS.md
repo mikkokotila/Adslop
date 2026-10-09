@@ -67,6 +67,16 @@ No exceptions, no handoff of routine PR monitoring to the marketer.**
   **blocked**, never 'done' or 'almost green'. Keep doing other useful work
   while actively checking the open PRs.
 
+**Never wait for Copilot.** The built-in reviewer consistently reports a
+quota-exhausted failure and is **advisory**, not one of the required nine CI
+checks. Do not manually request, retry, monitor, or wait for its review;
+continue immediately with \`bit-mis\` or another authorized independent human
+reviewer. Do not call its failed bot check green. Every required CI gate,
+independent human approval, branch currency, and zero unresolved review threads
+remain mandatory; if an automated review ever becomes a truly required status,
+report the conflict and enforce the actual configured gate instead of bypassing
+it.
+
 These checks are obligations **during active work**. No contributor may claim
 unattended monitoring after the session ends unless a real monitoring service
 has been separately established and verified.
