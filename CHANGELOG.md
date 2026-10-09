@@ -1,3 +1,9 @@
+# v0.6.0
+
+- Add pause-only atomic Google Search campaign create with dedicated budget, PAUSED keyword ad group, keywords and responsive search ads.
+- Read back native campaign, budget, keyword and creative state before declaring a write verified.
+- Restrict existing paused-campaign updates to name and non-shared budget; reject active campaigns and paid delivery activation.
+
 # v0.5.0
 
 - Reconcile exact Google Ads micro-unit campaign/day cost against account totals before admitting money-out.

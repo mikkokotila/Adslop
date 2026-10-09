@@ -1,0 +1,249 @@
+import { env } from 'cloudflare:workers';
+import { afterEach, expect, it, vi } from 'vitest';
+import worker, { type Env } from '../src/index';
+
+const customer = '1234567890';
+const root = 'https://adslop.test/v1/google-ads/accounts/' + customer;
+const credentials = {
+  GOOGLE_ADS_CLIENT_ID: 'fixture-client',
+  GOOGLE_ADS_CLIENT_SECRET: 'fixture-secret',
+  GOOGLE_ADS_REFRESH_TOKEN: 'fixture-refresh',
+  GOOGLE_ADS_DEVELOPER_TOKEN: 'fixture-developer',
+};
+const config = {
+  name: 'Paused Search fixture',
+  daily_budget_micros: '10000000',
+  cpc_bid_micros: '250000',
+  keywords: [{ text: 'hello world', match_type: 'EXACT' },
+    { text: 'search service', match_type: 'PHRASE' }],
+  headlines: ['Headline One', 'Headline Two', 'Headline Three'],
+  descriptions: ['Description one for testing', 'Description two for testing'],
+  final_url: 'https://example.org/landing',
+};
+
+async function call(method: string, path = '/paused-search-campaigns', body?: object): Promise<Response> {
+  return worker.fetch(new Request(root + path, {
+    method, headers: { Authorization: 'Bearer test-only-economic-ledger' },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  }), { ...env, ...credentials } as Env);
+}
+
+type NativeState = {
+  campaign: Record<string, unknown>;
+  budget: Record<string, unknown>;
+  group: Record<string, unknown>;
+  keywords: Array<{ adGroup: object; adGroupCriterion: object }>;
+  ad: { adGroup: object; adGroupAd: object };
+};
+
+function googleMock(options: {
+  mismatch?: boolean; active?: boolean; shared?: boolean; denyMutate?: boolean;
+} = {}) {
+  let state: NativeState | null = null;
+  const mutations: Array<{ mutateOperations: Array<Record<string, any>> }> = [];
+  const fetchMock = vi.fn(async (uri: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(uri);
+    if (url === 'https://oauth2.googleapis.com/token') {
+      return Response.json({ access_token: 'fixture-token' });
+    }
+    expect(new Headers(init?.headers).get('developer-token')).toBe('fixture-developer');
+    const body = JSON.parse(init?.body as string) as Record<string, unknown>;
+    if (url.endsWith('googleAds:mutate')) {
+      if (options.denyMutate) {
+        return Response.json({ error: 'PERMISSION_DENIED' }, {
+          status: 403, headers: { 'request-id': 'fixture-denied' },
+        });
+      }
+      const request = body as { mutateOperations: Array<Record<string, any>> };
+      expect(JSON.stringify(request.mutateOperations)).not.toContain('"ENABLED"');
+      mutations.push(request);
+      const ops = request.mutateOperations;
+      const prefix = 'customers/' + customer + '/';
+      if (ops[0].campaignBudgetOperation?.create) {
+        state = {
+          budget: { resourceName: prefix + 'campaignBudgets/510',
+            amountMicros: ops[0].campaignBudgetOperation.create.amountMicros,
+            explicitlyShared: options.shared ?? false },
+          campaign: { id: '610', status: options.active ? 'ENABLED' : 'PAUSED',
+            name: ops[1].campaignOperation.create.name, advertisingChannelType: 'SEARCH',
+            campaignBudget: prefix + 'campaignBudgets/510',
+            biddingStrategyType: 'MANUAL_CPC',
+            networkSettings: { targetGoogleSearch: true,
+              targetSearchNetwork: false, targetContentNetwork: false } },
+          group: { id: '710', name: ops[2].adGroupOperation.create.name,
+            status: 'PAUSED', type: 'SEARCH_STANDARD',
+            cpcBidMicros: ops[2].adGroupOperation.create.cpcBidMicros },
+          keywords: ops.slice(3, -1).map((operation, i) => ({
+            adGroup: { id: '710' },
+            adGroupCriterion: { criterionId: String(810 + i), status: 'PAUSED',
+              keyword: operation.adGroupCriterionOperation.create.keyword },
+          })),
+          ad: { adGroup: { id: '710' },
+            adGroupAd: { status: 'PAUSED', ad: {
+              id: '910', type: 'RESPONSIVE_SEARCH_AD',
+              finalUrls: ops.at(-1)!.adGroupAdOperation.create.ad.finalUrls,
+              responsiveSearchAd: {
+                headlines: options.mismatch ? [{ text: 'Different' }] :
+                  ops.at(-1)!.adGroupAdOperation.create.ad.responsiveSearchAd.headlines,
+                descriptions: ops.at(-1)!.adGroupAdOperation.create.ad.responsiveSearchAd.descriptions,
+              },
+            } } },
+        };
+        return Response.json({ mutateOperationResponses: [
+          { campaignBudgetResult: { resourceName: prefix + 'campaignBudgets/510' } },
+          { campaignResult: { resourceName: prefix + 'campaigns/610' } },
+          { adGroupResult: { resourceName: prefix + 'adGroups/710' } },
+          ...state.keywords.map((_, i) => ({
+            adGroupCriterionResult: {
+              resourceName: prefix + 'adGroupCriteria/710~' + String(810 + i),
+            },
+          })),
+          { adGroupAdResult: { resourceName: prefix + 'adGroupAds/710~910' } },
+        ] });
+      }
+      if (!state) throw Error('no created campaign fixture');
+      const campaignOp = ops[0].campaignOperation.update;
+      if (campaignOp.name) state.campaign.name = campaignOp.name;
+      state.campaign.status = 'PAUSED';
+      if (ops[1]?.campaignBudgetOperation) {
+        state.budget.amountMicros = ops[1].campaignBudgetOperation.update.amountMicros;
+      }
+      return Response.json({ mutateOperationResponses: [
+        { campaignResult: { resourceName: prefix + 'campaigns/610' } },
+        ...(ops.length > 1 ? [
+          { campaignBudgetResult: { resourceName: prefix + 'campaignBudgets/510' } },
+        ] : []),
+      ] });
+    }
+    const query = body.query as string;
+    if (query.includes('customer.id')) return Response.json({ results: [{
+      customer: { id: customer, descriptiveName: 'Fixture account',
+        currencyCode: 'EUR', timeZone: 'Europe/Helsinki', manager: false },
+    }] });
+    if (!state) return Response.json({ results: [] });
+    if (query.includes('FROM campaign_budget')) {
+      return Response.json({ results: [{ campaignBudget: state.budget }] });
+    }
+    if (query.includes('FROM campaign')) {
+      return Response.json({ results: [{ campaign: state.campaign }] });
+    }
+    if (query.includes('FROM ad_group_criterion')) {
+      return Response.json({ results: state.keywords });
+    }
+    if (query.includes('FROM ad_group_ad')) {
+      return Response.json({ results: [state.ad] });
+    }
+    if (query.includes('FROM ad_group')) {
+      return Response.json({ results: [{ adGroup: state.group }] });
+    }
+    throw Error('unexpected GAQL fixture ' + query);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { mutations, calls: fetchMock };
+}
+afterEach(() => vi.unstubAllGlobals());
+
+it('creates one atomic PAUSED keyword Search campaign and verifies native config by readback', async () => {
+  const google = googleMock();
+  const result = await call('POST', '/paused-search-campaigns', config);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({
+    status: 'verified_paused', campaign_id: '610',
+    paid_delivery_authorized: false, native: {
+      campaign: { name: config.name, status: 'PAUSED', advertisingChannelType: 'SEARCH' },
+      budget: { amountMicros: config.daily_budget_micros },
+      groups: [{ status: 'PAUSED', cpcBidMicros: config.cpc_bid_micros }],
+    },
+  });
+  expect(google.mutations).toHaveLength(1);
+  const operations = google.mutations[0].mutateOperations;
+  expect(operations).toHaveLength(6);
+  expect(operations[0].campaignBudgetOperation.create.resourceName).toMatch(/-1$/);
+  expect(operations[1].campaignOperation.create.resourceName).toMatch(/-2$/);
+  expect(operations[2].adGroupOperation.create.resourceName).toMatch(/-3$/);
+  expect(JSON.stringify(operations)).not.toContain('"ENABLED"');
+  const readback = await call('GET', '/paused-search-campaigns/610');
+  expect(readback.status).toBe(200);
+  expect(await readback.json()).toMatchObject({
+    status: 'verified_paused', native: { keywords: [{ status: 'PAUSED' }] },
+  });
+});
+
+it('updates only name and a dedicated budget while retaining campaign PAUSED', async () => {
+  const google = googleMock();
+  expect((await call('POST', '/paused-search-campaigns', config)).status).toBe(201);
+  const updated = await call('PATCH', '/paused-search-campaigns/610', {
+    name: 'A new paused Search name', daily_budget_micros: '11000000',
+  });
+  expect(updated.status).toBe(200);
+  expect(await updated.json()).toMatchObject({
+    status: 'verified_paused', native: {
+      campaign: { name: 'A new paused Search name', status: 'PAUSED' },
+      budget: { amountMicros: '11000000' },
+    },
+  });
+  expect(google.mutations).toHaveLength(2);
+  expect(google.mutations[1].mutateOperations).toMatchObject([
+    { campaignOperation: { updateMask: 'name,status', update: { status: 'PAUSED' } } },
+    { campaignBudgetOperation: { updateMask: 'amount_micros' } },
+  ]);
+});
+
+it('rejects write/readback mismatches rather than reporting a verified campaign', async () => {
+  googleMock({ mismatch: true });
+  const reply = await call('POST', '/paused-search-campaigns', config);
+  expect(reply.status).toBe(409);
+  expect(await reply.json()).toMatchObject({ error: 'google_ads_write_readback_mismatch' });
+});
+
+it('refuses updates to paid-active Search campaigns and shared budgets', async () => {
+  const active = googleMock({ active: true });
+  expect((await call('POST', '/paused-search-campaigns', config)).status).toBe(409);
+  const blocked = await call('PATCH', '/paused-search-campaigns/610', { name: 'New name' });
+  expect(blocked.status).toBe(409);
+  expect(await blocked.json()).toMatchObject({ error: 'google_ads_paid_delivery_not_authorized' });
+  expect(active.mutations).toHaveLength(1);
+  vi.unstubAllGlobals();
+  const shared = googleMock({ shared: true });
+  expect((await call('POST', '/paused-search-campaigns', config)).status).toBe(409);
+  const denied = await call('PATCH', '/paused-search-campaigns/610', {
+    daily_budget_micros: '20000000',
+  });
+  expect(denied.status).toBe(409);
+  expect(await denied.json()).toMatchObject({ error: 'google_ads_shared_budget_update_denied' });
+  expect(shared.mutations).toHaveLength(1);
+});
+
+it('rejects unknown status, invalid RSA assets, and non-HTTPS URLs without mutating', async () => {
+  const google = googleMock();
+  for (const body of [
+    { ...config, status: 'ENABLED' },
+    { ...config, descriptions: ['Only one'] },
+    { ...config, headlines: ['Dup', 'Dup', 'Third'] },
+    { ...config, final_url: 'http://example.org/not-secure' },
+  ]) {
+    const reply = await call('POST', '/paused-search-campaigns', body);
+    expect(reply.status).toBe(400);
+  }
+  const unsafeUpdate = await call('PATCH', '/paused-search-campaigns/610', {
+    status: 'ENABLED', name: 'A rename',
+  });
+  expect(unsafeUpdate.status).toBe(400);
+  expect(google.mutations).toHaveLength(0);
+  expect(google.calls).toHaveBeenCalledTimes(0);
+});
+
+it('requires source write permission and returns native request IDs without pretending success', async () => {
+  googleMock({ denyMutate: true });
+  const result = await call('POST', '/paused-search-campaigns', config);
+  expect(result.status).toBe(403);
+  expect(await result.json()).toEqual({
+    error: 'google_ads_access_denied', request_id: 'fixture-denied',
+  });
+  const unauthorized = await worker.fetch(
+    new Request(root + '/paused-search-campaigns', {
+      method: 'POST', body: JSON.stringify(config),
+    }), { ...env, ...credentials } as Env,
+  );
+  expect(unauthorized.status).toBe(401);
+});
