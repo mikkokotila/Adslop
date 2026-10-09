@@ -1,4 +1,4 @@
-# v0.4.1
+# v0.5.0
 
 - Add read-only Google Ads OAuth authentication, account discovery, native campaign and keyword inventory, and dated spend reporting.
 - Preserve account currencies, time zones and exact micro-unit evidence across paginated campaign, keyword and creative views.
