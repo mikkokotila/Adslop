@@ -55,9 +55,10 @@ jobs:
           node-version: '22'
 
       - name: Check the economic API in the Workers runtime
+        working-directory: apps/api
         run: |
-          corepack pnpm --dir apps/api install --frozen-lockfile
-          corepack pnpm --dir apps/api run check
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm run check
 
       - name: Set up lint venv
         run: python -m venv .venv-lint
