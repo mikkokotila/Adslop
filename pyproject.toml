@@ -61,6 +61,8 @@ ignore = [
   ".github/**",
   "docs-site/*",
   "docs-site/**",
+  "apps/*",
+  "apps/**",
   "fuzz/*",
   "fuzz/**",
   "scripts/*",
