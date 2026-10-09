@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
+import { pausedSearchCampaigns } from "./google-campaigns";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -450,6 +451,9 @@ export default {
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    if (/^\/v1\/google-ads\/accounts\/[0-9]{10}\/paused-search-campaigns(?:\/[1-9][0-9]*)?$/.test(url.pathname)) {
+      return pausedSearchCampaigns(request, url, env);
+    }
     const revisions = /^\/v1\/google-ads\/accounts\/([0-9]{10})\/revisions$/.exec(url.pathname);
     if (request.method === "GET" && revisions) {
       return Response.json(await ledger.googleHistory(revisions[1]));
