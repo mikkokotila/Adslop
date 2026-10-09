@@ -32,7 +32,10 @@ const campaignRow = (amount: string, date = '2026-10-08') => ({
   metrics: { costMicros: amount, clicks: '2', impressions: '100' },
 });
 
-function stubAds(options: { oauthFailure?: boolean; quota?: boolean; cycle?: boolean } = {}) {
+function stubAds(options: {
+  oauthFailure?: boolean; quota?: boolean; cycle?: boolean;
+  mixedDirect?: boolean; adsNetworkFailure?: boolean; badJson?: boolean;
+} = {}) {
   const calls: Array<{ url: string; request: Record<string, unknown> }> = [];
   const mocked = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
     const url = String(resource);
@@ -43,6 +46,8 @@ function stubAds(options: { oauthFailure?: boolean; quota?: boolean; cycle?: boo
       return Response.json({ access_token: 'test-access-token', expires_in: 3600 });
     }
     expect(url).toContain('https://googleads.googleapis.com/v25/');
+    if (options.adsNetworkFailure) throw new Error('private-network-detail');
+    if (options.badJson) return new Response('invalid upstream document', { status: 200 });
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-access-token');
     expect(new Headers(init?.headers).get('developer-token')).toBe('test-developer-token');
     if (options.quota) {
@@ -51,12 +56,18 @@ function stubAds(options: { oauthFailure?: boolean; quota?: boolean; cycle?: boo
       });
     }
     if (url.endsWith(':listAccessibleCustomers')) {
-      return Response.json({ resourceNames: ['customers/' + manager] });
+      return Response.json({ resourceNames: options.mixedDirect
+        ? ['customers/' + manager, 'customers/1111111111']
+        : ['customers/' + manager] });
     }
     const req = JSON.parse(init?.body as string) as Record<string, unknown>;
     calls.push({ url, request: req });
     const query = req.query as string;
+    if (options.mixedDirect && query.includes('customer.id')) {
+      expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
+    }
     if (query.includes('FROM customer_client')) {
+      expect(new Headers(init?.headers).get('login-customer-id')).toBe(manager);
       return Response.json({ results: [
         { customerClient: {
           id: id, descriptiveName: 'Client fixture', currencyCode: 'EUR',
@@ -70,7 +81,8 @@ function stubAds(options: { oauthFailure?: boolean; quota?: boolean; cycle?: boo
     }
     if (query.includes('FROM customer') && query.includes('customer.id')) {
       return Response.json({ results: [accountInfo(
-        url.includes(manager) ? manager : id, url.includes(manager),
+        url.includes('1111111111') ? '1111111111' : url.includes(manager) ? manager : id,
+        url.includes(manager),
       )] });
     }
     if (query.includes('FROM customer') && query.includes('segments.date')) {
@@ -130,9 +142,42 @@ it('refreshes OAuth and discovers managed accounts with native currencies and zo
     { id, name: 'Client fixture', currency: 'EUR', time_zone: 'Europe/Helsinki',
       manager: false, login_customer_id: manager },
     { id: manager, name: 'Manager fixture', currency: 'EUR', time_zone: 'Europe/Helsinki',
-      manager: true, login_customer_id: manager },
+      manager: true, login_customer_id: null },
   ] });
   expect(calls.some((x) => String(x.request.query).includes('FROM customer_client'))).toBe(true);
+});
+
+it('keeps directly accessible standalone accounts outside the configured manager usable', async () => {
+  stubAds({ mixedDirect: true });
+  const response = await get('/v1/google-ads/accounts');
+  expect(response.status).toBe(200);
+  const result = await response.json() as { accounts: Array<{
+    id: string; login_customer_id: string | null;
+  }> };
+  expect(result.accounts.map((account) => account.id)).toEqual([
+    '1111111111', id, manager,
+  ]);
+  expect(result.accounts[0].login_customer_id).toBeNull();
+  expect(result.accounts[1].login_customer_id).toBe(manager);
+});
+
+it('converts upstream fetch and JSON failures into secret-free machine-readable errors', async () => {
+  stubAds({ adsNetworkFailure: true });
+  const failure = await get('/v1/google-ads/accounts');
+  expect(failure.status).toBe(503);
+  expect(await failure.json()).toEqual({
+    error: 'google_ads_network_unavailable', request_id: null,
+  });
+  vi.unstubAllGlobals();
+  stubAds({ badJson: true });
+  const invalid = await get('/v1/google-ads/accounts');
+  expect(invalid.status).toBe(502);
+  expect(await invalid.json()).toMatchObject({ error: 'google_ads_invalid_response' });
+  vi.unstubAllGlobals();
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('private-oauth-error')));
+  const oauth = await get('/v1/google-ads/accounts');
+  expect(oauth.status).toBe(503);
+  expect(await oauth.json()).toMatchObject({ error: 'google_ads_oauth_unavailable' });
 });
 
 it('reads all paginated campaign cost as exact micro-units separately from native total', async () => {

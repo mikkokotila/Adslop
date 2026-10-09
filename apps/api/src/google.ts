@@ -124,11 +124,16 @@ export class GoogleAdsClient {
       client_secret: env.GOOGLE_ADS_CLIENT_SECRET,
       refresh_token: env.GOOGLE_ADS_REFRESH_TOKEN,
     });
-    const response = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form,
-    });
+    let response: Response;
+    try {
+      response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+      });
+    } catch {
+      throw new GoogleAdsError('google_ads_oauth_unavailable', 503);
+    }
     if (!response.ok) {
       throw new GoogleAdsError(
         response.status === 400 || response.status === 401
@@ -137,23 +142,31 @@ export class GoogleAdsClient {
         response.status === 400 || response.status === 401 ? 401 : 503,
       );
     }
-    const reply = object(await response.json());
-    return new GoogleAdsClient(env, textField(reply.access_token));
+    let reply: unknown;
+    try { reply = await response.json(); }
+    catch { throw new GoogleAdsError('google_ads_invalid_oauth_response', 502); }
+    return new GoogleAdsClient(env, textField(object(reply).access_token));
   }
 
-  async request(path: string, body?: Record<string, string>, loginId?: string): Promise<unknown> {
+  async request(path: string, body?: Record<string, string>, loginId?: string | null): Promise<unknown> {
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
       'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
     };
-    const login = loginId ?? this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+    // A caller's explicit null means a *direct* customer; no manager header.
+    const login = loginId === undefined ? this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID : loginId;
     if (login) headers['login-customer-id'] = login;
     if (body) headers['Content-Type'] = 'application/json';
-    const response = await fetch(root + path, {
-      method: body ? 'POST' : 'GET',
-      headers,
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+    let response: Response;
+    try {
+      response = await fetch(root + path, {
+        method: body ? 'POST' : 'GET',
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    } catch {
+      throw new GoogleAdsError('google_ads_network_unavailable', 503);
+    }
     if (!response.ok) {
       const requestId = response.headers.get('request-id');
       if (response.status === 429 || response.status === 503) {
@@ -167,10 +180,14 @@ export class GoogleAdsClient {
       }
       throw new GoogleAdsError('google_ads_request_failed', 502, requestId);
     }
-    return response.json();
+    try { return await response.json(); }
+    catch {
+      throw new GoogleAdsError('google_ads_invalid_response', 502,
+        response.headers.get('request-id'));
+    }
   }
 
-  async search(customerId: string, query: string, loginId?: string): Promise<AdsRow[]> {
+  async search(customerId: string, query: string, loginId?: string | null): Promise<AdsRow[]> {
     if (!idPattern.test(customerId)) throw new GoogleAdsError('google_ads_invalid_account', 400);
     const results: AdsRow[] = [];
     const seen = new Set<string>();
@@ -197,16 +214,17 @@ export class GoogleAdsClient {
     throw new GoogleAdsError('google_ads_page_limit_exceeded', 503);
   }
 
-  async account(customerId: string): Promise<Account> {
+  async account(customerId: string, loginId?: string | null): Promise<Account> {
     const rows = await this.search(customerId,
       'SELECT customer.id, customer.descriptive_name, customer.currency_code, ' +
-      'customer.time_zone, customer.manager FROM customer');
+      'customer.time_zone, customer.manager FROM customer', loginId);
     if (rows.length !== 1) throw new GoogleAdsError('google_ads_account_not_found', 502);
-    return accountFrom(property(rows[0], 'customer'), this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ?? null);
+    return accountFrom(property(rows[0], 'customer'),
+      loginId === undefined ? this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ?? null : loginId);
   }
 
   async accounts(): Promise<Account[]> {
-    const accessible = object(await this.request('/customers:listAccessibleCustomers'));
+    const accessible = object(await this.request('/customers:listAccessibleCustomers', undefined, null));
     if (!Array.isArray(accessible.resourceNames)) {
       throw new GoogleAdsError('google_ads_invalid_account_list', 502);
     }
@@ -214,7 +232,7 @@ export class GoogleAdsClient {
     for (const resource of accessible.resourceNames) {
       const id = textField(resource).replace(/^customers\//, '');
       if (!idPattern.test(id)) throw new GoogleAdsError('google_ads_invalid_account_list', 502);
-      const customer = await this.account(id);
+      const customer = await this.account(id, null);
       accounts.set(id, customer);
       if (!customer.manager) continue;
       const children = await this.search(id,
