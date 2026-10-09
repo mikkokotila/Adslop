@@ -24,6 +24,29 @@ To verify the first executable money-in/money-out capability, run `corepack pnpm
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 
+## Meta Ads read-only reporting
+
+The authenticated Worker API offers `GET /v1/meta/accounts` and
+`GET /v1/meta/spend?account_id=<id>&since=YYYY-MM-DD&until=YYYY-MM-DD&level=account|campaign|adset|ad`.
+The latter reports a separate account-level daily-spend baseline and a selected
+daily reporting breakdown, with exact decimal-string minor units in the ad
+account's native currency and account-local calendar. The response includes
+the Meta Graph API version and observation timestamp so a later read can be
+compared with its source revision; protected financial responses are not cached.
+Meta's separate reporting levels must **never** be added to each other. A Meta Insights report is
+platform-reported spend, **not** a settled advertising invoice; nothing is
+imported into the money ledger by these read-only endpoints.
+
+Supply `META_ACCESS_TOKEN` only as an encrypted Worker secret, backed by an
+authorized Meta app with `ads_read` access to the selected ad account. The
+existing `API_TOKEN` remains required for Adslop API callers. A browser login
+to Ads Manager does not grant a Graph API access token. Never log credentials,
+send them as URL query parameters or commit them to the repository. Responses
+fail closed on inaccessible accounts, missing credentials, malformed amounts,
+or incomplete upstream pages. The Meta API adapter is not live-validated until
+an authorized Graph token is provided and results are checked against Meta's
+own account reports. No ads are created, edited, or activated here.
+
 ## Local development
 
 The canonical working directory is `~/dev/Adslop`.

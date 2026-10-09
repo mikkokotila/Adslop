@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { handleMetaRequest } from "./meta";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -25,6 +26,7 @@ export interface Env {
   BUNNY_PULL_ZONE_ID: string;
   BUNNY_COLLECT_HOST: string;
   BUNNY_SIGNING_KEY: string;
+  META_ACCESS_TOKEN?: string;
 }
 
 const kinds: Kind[] = ["subscription_receipt", "subscription_refund", "ad_spend", "ad_credit"];
@@ -390,6 +392,9 @@ export default {
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    if (request.method === "GET" && url.pathname.startsWith("/v1/meta/")) {
+      return handleMetaRequest(url, env.META_ACCESS_TOKEN);
+    }
     if (request.method === "POST" && url.pathname === "/v1/bunny/poll") {
       try {
         return Response.json(await ledger.pollBunny(Date.now()));
