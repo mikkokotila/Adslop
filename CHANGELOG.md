@@ -1,3 +1,9 @@
+# v0.4.0
+
+- Add read-only Google Ads OAuth authentication, account discovery, native campaign and keyword inventory, and dated spend reporting.
+- Preserve account currencies, time zones and exact micro-unit evidence across paginated campaign, keyword and creative views.
+- Report expired credentials, incomplete pages and quota limits without inventing commercial values.
+
 # v0.3.1
 
 - Stop waiting for quota-exhausted advisory Copilot review during PR delivery.
