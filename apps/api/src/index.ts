@@ -69,7 +69,7 @@ function parseObservation(input: unknown): Observation {
   };
 }
 
-type RecordResult = { status: "created" | "duplicate" | "conflict" };
+type RecordResult = { status: "created" | "duplicate" | "conflict" | "overlap" };
 
 export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -137,7 +137,12 @@ export class MoneyLedger extends DurableObject<Env> {
   }
 
   async record(value: Observation): Promise<RecordResult> {
-    return this.ctx.storage.transactionSync(() => this.recordInTransaction(value));
+    try {
+      return this.ctx.storage.transactionSync(() => this.recordInTransaction(value));
+    } catch (error) {
+      if (error instanceof GoogleJournalError) return { status: "overlap" };
+      throw error;
+    }
   }
 
   async admitBunny(evidence: BunnyEvidence): Promise<string> {
@@ -320,9 +325,17 @@ export class MoneyLedger extends DurableObject<Env> {
   }
 
   async reconcileGoogle(product: string, report: GoogleSpendReport, campaigns: string[]): Promise<object> {
-    return this.ctx.storage.transactionSync(() =>
-      new GoogleCostJournal(this.ctx.storage.sql).apply(product, report, campaigns)
-    );
+    try {
+      return this.ctx.storage.transactionSync(() =>
+        new GoogleCostJournal(this.ctx.storage.sql).apply(product, report, campaigns)
+      );
+    } catch (error) {
+      // Durable Object RPC does not preserve Error subclasses across the stub.
+      if (error instanceof GoogleJournalError) {
+        return { error: error.code, error_status: error.status };
+      }
+      throw error;
+    }
   }
 
   async googleHistory(customer: string): Promise<object> {
@@ -454,6 +467,11 @@ export default {
         const result = await ledger.reconcileGoogle(
           form.product_id, report, form.campaign_ids as string[]
         );
+        if ("error" in result) {
+          return Response.json({ error: result.error, request_id: null }, {
+            status: (result as { error_status: number }).error_status,
+          });
+        }
         return Response.json(result, {
           status: (result as { status: string }).status === "created" ? 201 : 200,
         });
@@ -515,6 +533,7 @@ export default {
         if (error instanceof GoogleJournalError) return response(error.code, error.status);
         throw error;
       }
+      if (result.status === "overlap") return response("google_ads_manual_spend_overlap", 409);
       if (result.status === "conflict") return response("conflicting_event_id", 409);
       return Response.json({ ...result, event_id: value.event_id }, {
         status: result.status === "created" ? 201 : 200,
