@@ -1,3 +1,8 @@
+# v0.6.1
+
+- Grant the slice closeout job repository read access so private-repository checkout can verify merged issue evidence.
+- Guard effective checkout permissions against job-level permission overrides.
+
 # v0.6.0
 
 - Reconcile exact Google Ads micro-unit campaign/day cost against account totals before admitting money-out.

@@ -59,6 +59,18 @@ def test_slice_closeout_guard_workflow_contract() -> None:
     assert 'if: failure()\n' in workflow
 
 
+def test_closeout_checkout_permissions() -> None:
+    """Private-repository checkout needs the job's effective contents grant."""
+    workflow = yaml.safe_load(CLOSEOUT_GUARD_WORKFLOW.read_text(encoding='utf-8'))
+    job = workflow['jobs']['slice_closeout_guard']
+    assert any(
+        step.get('uses', '').startswith('actions/checkout@') for step in job['steps']
+    )
+    permissions = job.get('permissions', workflow.get('permissions', {}))
+    assert isinstance(permissions, dict)
+    assert permissions.get('contents') in ('read', 'write')
+
+
 def test_slice_on_issue_workflow_contract() -> None:
     workflow = ON_ISSUE_WORKFLOW.read_text(encoding='utf-8')
 
