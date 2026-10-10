@@ -18,6 +18,7 @@ export class GoogleAdsError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly requestId: string | null = null,
+    public readonly responseStatus: number | null = null,
   ) {
     super(code);
   }
@@ -114,6 +115,9 @@ function accountFrom(value: Record<string, unknown>, loginId: string | null): Ac
 export class GoogleAdsClient {
   private directCustomers?: Set<string>;
   private discoveredAccounts?: Account[];
+  private lastRequestId: string | null = null;
+
+  get responseRequestId(): string | null { return this.lastRequestId; }
 
   private constructor(
     private readonly env: GoogleAdsConfig,
@@ -159,7 +163,8 @@ export class GoogleAdsClient {
     return new GoogleAdsClient(env, textField(object(reply).access_token));
   }
 
-  async request(path: string, body?: Record<string, string>, loginId?: string | null): Promise<unknown> {
+  async request(path: string, body?: Record<string, unknown>, loginId?: string | null): Promise<unknown> {
+    this.lastRequestId = null;
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
       'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
@@ -178,23 +183,24 @@ export class GoogleAdsClient {
     } catch {
       throw new GoogleAdsError('google_ads_network_unavailable', 503);
     }
+    this.lastRequestId = response.headers.get('request-id');
     if (!response.ok) {
       const requestId = response.headers.get('request-id');
       if (response.status === 429 || response.status === 503) {
-        throw new GoogleAdsError('google_ads_quota_or_service_unavailable', 503, requestId);
+        throw new GoogleAdsError('google_ads_quota_or_service_unavailable', 503, requestId, response.status);
       }
       if (response.status === 401) {
-        throw new GoogleAdsError('google_ads_reauthorization_required', 401, requestId);
+        throw new GoogleAdsError('google_ads_reauthorization_required', 401, requestId, response.status);
       }
       if (response.status === 403) {
-        throw new GoogleAdsError('google_ads_access_denied', 403, requestId);
+        throw new GoogleAdsError('google_ads_access_denied', 403, requestId, response.status);
       }
-      throw new GoogleAdsError('google_ads_request_failed', 502, requestId);
+      throw new GoogleAdsError('google_ads_request_failed', 502, requestId, response.status);
     }
     try { return await response.json(); }
     catch {
       throw new GoogleAdsError('google_ads_invalid_response', 502,
-        response.headers.get('request-id'));
+        response.headers.get('request-id'), response.status);
     }
   }
 
