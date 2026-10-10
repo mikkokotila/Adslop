@@ -1,7 +1,15 @@
-# v0.6.1
+# v0.7.1
 
 - Grant the slice closeout job repository read access so private-repository checkout can verify merged issue evidence.
 - Guard effective checkout permissions against job-level permission overrides.
+
+# v0.7.0
+
+- Add pause-only atomic Google Search campaign create with dedicated budget, PAUSED keyword ad group, keywords and responsive search ads.
+- Read back native campaign, budget, keyword and creative state before declaring a write verified.
+- Restrict existing paused-campaign updates to name and non-shared budget; reject active campaigns and paid delivery activation.
+- Require an explicit non-political advertiser declaration and preserve known native resource identities when submitted writes cannot be verified.
+- Route paused campaign mutations through the resolved direct or manager account context.
 
 # v0.6.0
 
