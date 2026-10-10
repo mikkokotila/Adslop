@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { googleAdsRead, GoogleAdsError, type GoogleAdsConfig } from "./google";
 import { handleMetaRequest } from "./meta";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
@@ -19,7 +20,7 @@ export interface Observation {
   occurred_at: string;
 }
 
-export interface Env {
+export interface Env extends GoogleAdsConfig {
   MONEY: DurableObjectNamespace<MoneyLedger>;
   API_TOKEN: string;
   BUNNY_ACCESS_KEY: string;
@@ -392,6 +393,16 @@ export default {
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    if (request.method === "GET" && url.pathname.startsWith("/v1/google-ads/")) {
+      try {
+        return await googleAdsRead(url, env);
+      } catch (error) {
+        if (error instanceof GoogleAdsError) {
+          return Response.json({ error: error.code, request_id: error.requestId }, { status: error.status });
+        }
+        throw error;
+      }
+    }
     if (request.method === "GET" && url.pathname.startsWith("/v1/meta/")) {
       return handleMetaRequest(url, env.META_ACCESS_TOKEN);
     }
