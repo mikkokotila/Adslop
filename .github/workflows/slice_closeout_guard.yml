@@ -20,6 +20,7 @@ jobs:
     name: Slice Closeout Guard
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
       pull-requests: read
       checks: read

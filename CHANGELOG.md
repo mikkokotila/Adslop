@@ -1,3 +1,8 @@
+# v0.7.1
+
+- Grant the slice closeout job repository read access so private-repository checkout can verify merged issue evidence.
+- Guard effective checkout permissions against job-level permission overrides.
+
 # v0.7.0
 
 - Add pause-only atomic Google Search campaign create with dedicated budget, PAUSED keyword ad group, keywords and responsive search ads.
