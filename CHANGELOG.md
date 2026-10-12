@@ -1,3 +1,7 @@
+# v0.8.3
+
+- Use supported redirect handling for Meta reports in the Workers runtime without forwarding credentials.
+
 # v0.8.2
 
 - Deploy the existing Cloudflare Worker after merges to main while preserving the money ledger, Bunny settings, and secrets.

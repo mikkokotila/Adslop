@@ -77,6 +77,10 @@ demonstrated incremental subscription revenue. The integration is not live
 validated until a real authorized Meta Graph account report can be compared
 with the same period in Ads Manager. No Meta ad mutation is implemented here.
 
+Meta Graph requests use Workers-supported manual redirects and reject redirect
+responses, preventing authorization from being forwarded to another destination.
+Rotate user access tokens before their reported expiry to retain reporting access.
+
 ## Cloudflare deployment
 
 Merges to `main` run `.github/workflows/deploy_cloudflare.yml` with the locked

@@ -18,19 +18,31 @@ function account() {
 
 function stubGraph(handler: (url: URL) => Response | Promise<Response>) {
   const spy = vi.fn(async (target: URL | RequestInfo, init?: RequestInit) => {
+    // Exercise native Workers option validation before simulating Graph replies.
+    new Request(target, init);
     const url = new URL(target instanceof URL ? target.href :
       typeof target === "string" ? target : target.url);
     expect(url.origin).toBe("https://graph.facebook.com");
     expect(url.pathname.startsWith("/v25.0/")).toBe(true);
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer " + token);
     expect(init?.method).toBe("GET");
-    expect(init?.redirect).toBe("error");
+    expect(init?.redirect).toBe("manual");
     expect(url.searchParams.has("access_token")).toBe(false);
     return handler(url);
   });
   vi.stubGlobal("fetch", spy);
   return spy;
 }
+
+it("rejects Graph redirects without forwarding credentials", async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    const requests = stubGraph(() => Response.redirect("https://attacker.example/collect", status));
+    const reply = await handleMetaRequest(new URL(base + "/v1/meta/accounts"), token);
+    expect(reply.status).toBe(502);
+    expect(await reply.json()).toEqual({ error: "meta_upstream_failed" });
+    expect(requests).toHaveBeenCalledTimes(1);
+  }
+});
 
 it("returns exact daily Meta spend without counting breakdowns twice", async () => {
   const seen: string[] = [];
