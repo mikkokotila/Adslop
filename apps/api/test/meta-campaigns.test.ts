@@ -143,3 +143,44 @@ it("does not verify expanded audience or altered delivery controls",async()=>{
     vi.unstubAllGlobals();
   }
 });
+
+it("preserves ad set identity when post-mutation readback fails",async()=>{
+  const fake=vi.fn(async(url:RequestInfo | URL)=>{
+    const path=new URL(String(url)).pathname;
+    if(path.endsWith("/campaigns")) return Response.json({id:"111"});
+    if(path.endsWith("/111")) return Response.json({id:"111",account_id:"1390405164595271",
+      status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if(path.endsWith("/adsets")) return Response.json({id:"222"});
+    if(path.endsWith("/222")) return Response.json({error:"unavailable"},{status:503});
+    throw Error("unexpected");
+  });
+  vi.stubGlobal("fetch",fake);
+  const result=await invoke("POST","",config);
+  expect(result.status).toBe(502);
+  expect(await result.json()).toMatchObject({status:"write_unverified",
+    campaign_id:"111",adset_id:"222",paid_delivery_authorized:false});
+  expect(fake.mock.calls.filter(x=>String(x[0]).endsWith("/adsets"))).toHaveLength(1);
+});
+it("does not claim audience targeting when native interests are absent",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async(url:RequestInfo | URL)=>{
+    const path=new URL(String(url)).pathname;
+    if(path.endsWith("/111")) return Response.json({id:"111",
+      account_id:"1390405164595271",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    return Response.json({id:"222",account_id:"1390405164595271",
+      campaign_id:"111",status:"PAUSED",optimization_goal:"LINK_CLICKS",
+      billing_event:"IMPRESSIONS",targeting:{geo_locations:{countries:["US"]}}});
+  }));
+  const result=await invoke("GET","/111/adsets/222");
+  expect(result.status).toBe(409);
+  expect(await result.json()).toMatchObject({error:"meta_readback_mismatch"});
+});
+it("preserves unrelated money ledger observation retrieval routing",async()=>{
+  vi.stubGlobal("fetch",vi.fn());
+  const res=await worker.fetch(new Request(
+    "https://adslop.test/v1/observations/paused-audience-campaigns?product_id=demo&source=demo",{
+      headers:{Authorization:"Bearer test-only-economic-ledger"}
+    }),{...env,META_ACCESS_TOKEN:"fixture"} as Env);
+  expect(res.status).toBe(404);
+  expect(await res.json()).toMatchObject({error:"not_found"});
+  expect(fetch).not.toHaveBeenCalled();
+});

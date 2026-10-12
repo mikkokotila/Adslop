@@ -612,7 +612,8 @@ export default {
       });
     }
     if (url.pathname === "/v1/meta/targeting-interests" ||
-        url.pathname.includes("/paused-audience-campaigns")) {
+        (url.pathname.startsWith("/v1/meta/accounts/") &&
+         url.pathname.includes("/paused-audience-campaigns"))) {
       return handleMetaCampaignRequest(request, url, env.META_ACCESS_TOKEN);
     }
     if (request.method === "GET" && url.pathname.startsWith("/v1/meta/")) {

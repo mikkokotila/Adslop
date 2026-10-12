@@ -86,9 +86,15 @@ async function snapshot(id: string, token: string, accountId: string, adsetId?: 
   const adset = await graph("GET", adsetId, token, {
     fields: "id,account_id,name,status,effective_status,campaign_id,daily_budget,targeting,optimization_goal,billing_event",
   });
+  const targeting = adset.targeting && typeof adset.targeting === "object" &&
+    !Array.isArray(adset.targeting) ? adset.targeting as Obj : null;
+  const geography = targeting?.geo_locations && typeof targeting.geo_locations === "object" &&
+    !Array.isArray(targeting.geo_locations) ? targeting.geo_locations as Obj : null;
   if (adset.id !== adsetId || adset.campaign_id !== id || adset.account_id !== accountId ||
       adset.status !== "PAUSED" || adset.optimization_goal !== "LINK_CLICKS" ||
-      adset.billing_event !== "IMPRESSIONS") {
+      adset.billing_event !== "IMPRESSIONS" ||
+      !Array.isArray(geography?.countries) || !geography.countries.length ||
+      !Array.isArray(targeting?.interests) || !targeting.interests.length) {
     throw new MetaCampaignError("meta_readback_mismatch", 409);
   }
   return { campaign, adset };
@@ -134,10 +140,13 @@ export async function handleMetaCampaignRequest(
   if (!token) return Response.json({error:"meta_not_configured"}, {status:503});
   if (url.search) return Response.json({error:"meta_invalid_query"}, {status:400});
   let campaignId: string | null = null;
+  let adsetId: string | null = null;
   try {
     if (request.method === "GET" && route[2]) {
       const native = await snapshot(route[2], token, route[1], route[3]);
-      return Response.json({status:"verified_paused", targeting_mode:"AUDIENCE_INTERESTS",
+      return Response.json({status:"verified_paused",
+        ...(route[3] ? {targeting_mode:"AUDIENCE_INTERESTS"} :
+          {audience_not_verified:true}),
         campaign_id:route[2], ...(route[3] ? {adset_id:route[3]} : {}),
         native, paid_delivery_authorized:false});
     }
@@ -168,6 +177,7 @@ export async function handleMetaCampaignRequest(
       }),
     });
     if (!validId(adset.id)) throw new MetaCampaignError("meta_adset_identity_uncertain", 502, true,campaignId);
+    adsetId = adset.id;
     const native = await snapshot(campaignId, token, route[1], adset.id);
     const actualTargeting = native.adset?.targeting;
     const actual = actualTargeting && typeof actualTargeting === "object" &&
@@ -193,7 +203,8 @@ export async function handleMetaCampaignRequest(
     if (error instanceof MetaCampaignError) {
       return Response.json({error:error.code,
         ...(error.uncertain || campaignId ? {status:"write_unverified",
-          ...(campaignId ? {campaign_id:campaignId} : {})} : {}),
+          ...(campaignId ? {campaign_id:campaignId} : {}),
+          ...(adsetId ? {adset_id:adsetId} : {})} : {}),
         paid_delivery_authorized:false},{status:error.status});
     }
     throw error;
