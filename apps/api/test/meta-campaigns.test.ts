@@ -1,0 +1,74 @@
+import { env } from "cloudflare:workers";
+import { afterEach, expect, it, vi } from "vitest";
+import worker, {type Env} from "../src/index";
+
+const root = "https://adslop.test/v1/meta/accounts/1390405164595271/paused-audience-campaigns";
+const config = {name:"Eightchord | Meta | Paused",daily_budget_minor:"500",
+  countries:["US"],interest_ids:["6000000000001"],targeting_mode:"AUDIENCE_INTERESTS"};
+async function invoke(method: string, path = "", data?: object, token = "fixture") {
+  return worker.fetch(new Request(root + path,{method,
+    headers:{Authorization:"Bearer test-only-economic-ledger"},
+    ...(data ? {body:JSON.stringify(data)}:{})}),{...env,META_ACCESS_TOKEN:token} as Env);
+}
+afterEach(() => vi.unstubAllGlobals());
+it("creates paused Meta campaign and audience ad set with independent readback", async () => {
+  const calls: Array<{path:string;body:string}> = [];
+  const fake = vi.fn(async (url: RequestInfo | URL, init?:RequestInit) => {
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer fixture");
+    expect(init?.redirect).toBe("manual");
+    const path = new URL(String(url)).pathname;
+    const body = String(init?.body || "");
+    calls.push({path,body});
+    if (path.endsWith("/campaigns")) {
+      expect(body).toContain("status=PAUSED");
+      return Response.json({id:"111"});
+    }
+    if (path.endsWith("/adsets")) {
+      expect(body).toContain("status=PAUSED");
+      expect(body).toContain("daily_budget=500");
+      return Response.json({id:"222"});
+    }
+    if (path.endsWith("/111")) return Response.json({id:"111",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if (path.endsWith("/222")) return Response.json({id:"222",status:"PAUSED",
+      campaign_id:"111",daily_budget:"500", targeting:{
+        geo_locations:{countries:["US"]},interests:[{id:"6000000000001"}]}});
+    throw Error("unexpected graph path");
+  });
+  vi.stubGlobal("fetch",fake);
+  const result = await invoke("POST","",config);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({status:"verified_paused",
+    campaign_id:"111",adset_id:"222",paid_delivery_authorized:false,
+    creative_not_created:true,targeting_mode:"AUDIENCE_INTERESTS"});
+  const read = await invoke("GET","/111/adsets/222");
+  expect(read.status).toBe(200);
+  expect(await read.json()).toMatchObject({status:"verified_paused",
+    campaign_id:"111",adset_id:"222",native:{campaign:{status:"PAUSED"},adset:{status:"PAUSED"}},
+    paid_delivery_authorized:false});
+  expect(calls.filter(c=>c.path.endsWith("/campaigns")||c.path.endsWith("/adsets"))).toHaveLength(2);
+});
+it("rejects keyword substitution, unapproved activation and unsupported methods",async()=>{
+  vi.stubGlobal("fetch",vi.fn());
+  const bad=await invoke("POST","",{...config,targeting_mode:"POSITIVE_KEYWORDS"});
+  expect(bad.status).toBe(400);
+  const extra=await invoke("POST","",{...config,status:"ACTIVE"});
+  expect(extra.status).toBe(400);
+  const method=await invoke("PATCH","/111",{status:"ACTIVE"});
+  expect(method.status).toBe(405);
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("marks a partially created campaign unverified rather than retrying",async()=>{
+  const fake=vi.fn(async(url:RequestInfo | URL)=>{
+    const path=new URL(String(url)).pathname;
+    if(path.endsWith("/campaigns")) return Response.json({id:"111"});
+    if(path.endsWith("/111")) return Response.json({id:"111",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if(path.endsWith("/adsets")) return Response.json({error:{message:"denied"}},{status:400});
+    throw Error("unexpected graph path");
+  });
+  vi.stubGlobal("fetch",fake);
+  const res=await invoke("POST","",config);
+  expect(res.status).toBe(502);
+  expect(await res.json()).toMatchObject({status:"write_unverified",campaign_id:"111",
+    paid_delivery_authorized:false});
+  expect(fake.mock.calls.filter(x=>String(x[0]).endsWith("/adsets"))).toHaveLength(1);
+});
