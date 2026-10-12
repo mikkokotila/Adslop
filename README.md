@@ -85,9 +85,9 @@ Worker toolchain and `apps/api/wrangler.deploy.jsonc`. The deployment updates
 Bunny Pull Zone, one-minute schedule, and encrypted Worker secrets. Each version
 records the merged commit SHA. Deployments serialize and skip superseded heads.
 
-GitHub Actions requires repository secrets `CLOUDFLARE_API_TOKEN` and
-`CLOUDFLARE_ACCOUNT_ID`. Scope the token to deployment of this Worker in the
-existing Cloudflare account. Billing and advertising tokens stay in encrypted
+GitHub Actions requires repository secret `CLOUDFLARE_API_TOKEN`; the existing
+account ID is pinned in the deployment configuration. Scope the token to Worker
+deployment in that account. Deployment retains dashboard-managed variables. Billing and advertising tokens stay in encrypted
 Worker secrets; they are never copied into the repository or deployment logs.
 The workflow can also be dispatched from `main` after a deployment failure.
 

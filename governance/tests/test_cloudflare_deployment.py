@@ -22,7 +22,7 @@ def test_only_main_can_deploy_with_repository_secrets() -> None:
     deploy = job['steps'][-1]
     assert deploy['env']['CLOUDFLARE_API_TOKEN'] == '${{ secrets.CLOUDFLARE_API_TOKEN }}'
     assert 'test -n "$CLOUDFLARE_API_TOKEN"' in deploy['run']
-    assert 'wrangler deploy --config wrangler.deploy.jsonc --message "$GITHUB_SHA"' in deploy['run']
+    assert 'wrangler deploy --config wrangler.deploy.jsonc --keep-vars --message "$GITHUB_SHA"' in deploy['run']
 
 
 def test_deployments_serialize_and_reject_superseded_main_heads() -> None:
@@ -40,6 +40,7 @@ def test_deployments_serialize_and_reject_superseded_main_heads() -> None:
 def test_deployment_preserves_the_existing_money_ledger_and_collection() -> None:
     config = json.loads(CONFIG.read_text())
     assert config['name'] == 'adslop-api-preview'
+    assert config['account_id'] == '758576157d0685fa4eb2aeaf16781577'
     assert config['main'] == 'src/index.ts'
     assert config['durable_objects']['bindings'] == [
         {'name': 'MONEY', 'class_name': 'MoneyLedger'}
