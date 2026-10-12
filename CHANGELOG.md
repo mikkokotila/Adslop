@@ -1,3 +1,7 @@
+# v0.8.1
+
+Deploy the existing Cloudflare Worker after merges to main while preserving the money ledger, Bunny settings, and secrets.
+
 # v0.8.0
 
 - Reconcile complete native Meta daily campaign costs against reported account spend.

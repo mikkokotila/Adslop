@@ -1,0 +1,31 @@
+{
+  "name": "adslop-api-preview",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-09",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MONEY",
+        "class_name": "MoneyLedger"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "MoneyLedger"
+      ]
+    }
+  ],
+  "vars": {
+    "BUNNY_PULL_ZONE_ID": "6769737",
+    "BUNNY_COLLECT_HOST": "adslop-event-collector-j6mco.bunny.run"
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
+}
