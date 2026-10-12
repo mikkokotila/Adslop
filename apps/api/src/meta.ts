@@ -86,7 +86,7 @@ async function graphGet(url: URL, token: string): Promise<MetaJson> {
   let reply: Response;
   try {
     reply = await fetch(url, {
-      method: "GET", redirect: "error",
+      method: "GET", redirect: "manual",
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
   } catch {
