@@ -75,6 +75,8 @@ it("rejects keyword substitution, unapproved activation and unsupported methods"
   expect(bad.status).toBe(400);
   const extra=await invoke("POST","",{...config,status:"ACTIVE"});
   expect(extra.status).toBe(400);
+  const duplicateGeo=await invoke("POST","",{...config,countries:["US","US"]});
+  expect(duplicateGeo.status).toBe(400);
   const method=await invoke("PATCH","/111",{status:"ACTIVE"});
   expect(method.status).toBe(405);
   expect(fetch).not.toHaveBeenCalled();

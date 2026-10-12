@@ -34,7 +34,8 @@ function parse(value: unknown) {
     throw new MetaCampaignError("meta_unsupported_campaign_configuration", 400);
   }
   if (!Array.isArray(v.countries) || v.countries.length < 1 || v.countries.length > 10 ||
-      v.countries.some(x => typeof x !== "string" || !/^[A-Z]{2}$/.test(x))) {
+      v.countries.some(x => typeof x !== "string" || !/^[A-Z]{2}$/.test(x)) ||
+      new Set(v.countries).size !== v.countries.length) {
     throw new MetaCampaignError("meta_invalid_countries", 400);
   }
   if (!Array.isArray(v.interest_ids) || !v.interest_ids.length || v.interest_ids.length > 15 ||
