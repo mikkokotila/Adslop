@@ -19,7 +19,6 @@ const credentials = {
   GOOGLE_ADS_CLIENT_ID: 'fixture-client',
   GOOGLE_ADS_CLIENT_SECRET: 'fixture-secret',
   GOOGLE_ADS_REFRESH_TOKEN: 'fixture-refresh',
-  GOOGLE_ADS_DEVELOPER_TOKEN: 'fixture-developer',
 };
 const config = {
   contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
@@ -82,7 +81,7 @@ function googleMock(options: {
     if (url === 'https://oauth2.googleapis.com/token') {
       return Response.json({ access_token: 'fixture-token' });
     }
-    expect(new Headers(init?.headers).get('developer-token')).toBe('fixture-developer');
+    expect(new Headers(init?.headers).get('developer-token')).toBeNull();
     if (url.endsWith('/customers:listAccessibleCustomers')) {
       expect(new Headers(init?.headers).get('login-customer-id')).toBeNull();
       return Response.json({ resourceNames: options.managed

@@ -1,3 +1,8 @@
+# v0.8.1
+
+- Remove the retired Google Ads developer-token prerequisite and header from account reads, cost reconciliation, and paused Search campaign writes.
+- Keep OAuth authorization and Google Cloud project access checks while exercising tokenless requests in the Workers runtime.
+
 # v0.8.0
 
 - Reconcile complete native Meta daily campaign costs against reported account spend.

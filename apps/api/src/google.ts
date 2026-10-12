@@ -6,7 +6,6 @@ import type { GoogleSpendReport } from './google-ledger';
  */
 
 export interface GoogleAdsConfig {
-  GOOGLE_ADS_DEVELOPER_TOKEN: string;
   GOOGLE_ADS_CLIENT_ID: string;
   GOOGLE_ADS_CLIENT_SECRET: string;
   GOOGLE_ADS_REFRESH_TOKEN: string;
@@ -125,8 +124,8 @@ export class GoogleAdsClient {
   ) {}
 
   static async connect(env: GoogleAdsConfig): Promise<GoogleAdsClient> {
-    if (!env.GOOGLE_ADS_DEVELOPER_TOKEN || !env.GOOGLE_ADS_CLIENT_ID ||
-        !env.GOOGLE_ADS_CLIENT_SECRET || !env.GOOGLE_ADS_REFRESH_TOKEN) {
+    if (!env.GOOGLE_ADS_CLIENT_ID || !env.GOOGLE_ADS_CLIENT_SECRET ||
+        !env.GOOGLE_ADS_REFRESH_TOKEN) {
       throw new GoogleAdsError('google_ads_credentials_not_configured', 503);
     }
     if (env.GOOGLE_ADS_LOGIN_CUSTOMER_ID &&
@@ -167,7 +166,6 @@ export class GoogleAdsClient {
     this.lastRequestId = null;
     const headers: Record<string, string> = {
       Authorization: 'Bearer ' + this.accessToken,
-      'developer-token': this.env.GOOGLE_ADS_DEVELOPER_TOKEN,
     };
     // A caller's explicit null means a *direct* customer; no manager header.
     const login = loginId === undefined ? this.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID : loginId;
