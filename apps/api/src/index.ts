@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
+import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
 import { pausedSearchCampaigns } from "./google-campaigns";
-import { handleMetaRequest } from "./meta";
+import { handleMetaRequest, readMetaSpendReport, MetaReadError } from "./meta";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -78,6 +79,7 @@ export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     new GoogleCostJournal(this.ctx.storage.sql).create();
+    new MetaCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS observations (
         product_id TEXT NOT NULL,
@@ -125,6 +127,13 @@ export class MoneyLedger extends DurableObject<Env> {
           new GoogleCostJournal(this.ctx.storage.sql).hasImportedSpend(value.product_id, value.currency)) {
         throw new GoogleJournalError("google_ads_manual_spend_overlap", 409);
       }
+      if ((value.kind === "ad_spend" || value.kind === "ad_credit") &&
+          value.channel === "meta" &&
+          new MetaCostJournal(this.ctx.storage.sql).hasImportedSpend(
+            value.product_id, value.currency
+          )) {
+        throw new MetaJournalError("meta_manual_spend_overlap", 409);
+      }
       const existing = this.ctx.storage.sql.exec<{ body: string }>(
         "SELECT body FROM observations WHERE product_id=? AND source=? AND event_id=?",
         value.product_id, value.source, value.event_id
@@ -143,7 +152,8 @@ export class MoneyLedger extends DurableObject<Env> {
     try {
       return this.ctx.storage.transactionSync(() => this.recordInTransaction(value));
     } catch (error) {
-      if (error instanceof GoogleJournalError) return { status: "overlap" };
+      if (error instanceof GoogleJournalError ||
+          error instanceof MetaJournalError) return { status: "overlap" };
       throw error;
     }
   }
@@ -357,6 +367,38 @@ export class MoneyLedger extends DurableObject<Env> {
     return { customer_id: customer, revisions: new GoogleCostJournal(this.ctx.storage.sql).history(customer) };
   }
 
+  private metaReconcileRunning = false;
+
+  async reconcileMeta(product: string, account: string, since: string,
+    until: string, campaigns: string[], token?: string): Promise<object> {
+    if (this.metaReconcileRunning) {
+      return { error: "meta_reconcile_busy", error_status: 409 };
+    }
+    if (!token) return { error: "meta_not_configured", error_status: 503 };
+    this.metaReconcileRunning = true;
+    try {
+      const snapshot = await readMetaSpendReport(account, since, until, "campaign", token);
+      return this.ctx.storage.transactionSync(() =>
+        new MetaCostJournal(this.ctx.storage.sql).apply(product, snapshot, campaigns)
+      );
+    } catch (error) {
+      // Durable Object RPC does not preserve custom Error subclasses.
+      if (error instanceof MetaJournalError || error instanceof MetaReadError) {
+        return { error: error.code, error_status: error.status };
+      }
+      throw error;
+    } finally {
+      this.metaReconcileRunning = false;
+    }
+  }
+
+  async metaHistory(account: string): Promise<object> {
+    return {
+      account_id: account,
+      revisions: new MetaCostJournal(this.ctx.storage.sql).history(account),
+    };
+  }
+
   async find(product: string, source: string, id: string): Promise<Observation | null> {
     const row = this.ctx.storage.sql.exec<{ body: string }>(
       "SELECT body FROM observations WHERE product_id=? AND source=? AND event_id=?",
@@ -400,7 +442,12 @@ export class MoneyLedger extends DurableObject<Env> {
     const importedMicros = googleRows.reduce(
       (sum, row) => sum + BigInt(row.cost_micros), 0n
     );
-    const advertisingMicros = (spend - credits) * microsPerMinor + importedMicros;
+    const metaRows = new MetaCostJournal(this.ctx.storage.sql).latest(product, currency);
+    const importedMetaMinor = metaRows.reduce(
+      (sum, row) => sum + BigInt(row.spend_minor), 0n
+    );
+    const advertisingMicros =
+      (spend - credits + importedMetaMinor) * microsPerMinor + importedMicros;
     const differenceMicros = subscriptionRevenue * microsPerMinor - advertisingMicros;
     const limit = BigInt(Number.MAX_SAFE_INTEGER);
     const exact = (value: bigint): number => {
@@ -418,11 +465,13 @@ export class MoneyLedger extends DurableObject<Env> {
       difference_micros: differenceMicros.toString(),
       advertising_spend_by_channel_minor: {
         google: exactMinor(byChannel.google * microsPerMinor + importedMicros),
-        meta: exact(byChannel.meta),
+        meta: exact(byChannel.meta + importedMetaMinor),
       },
-      evidence: googleRows.length
-        ? "admitted_observations_and_google_ads_daily_revisions"
-        : "admitted_observations_only",
+      evidence: [
+        "admitted_observations",
+        ...(googleRows.length ? ["google_ads_daily_revisions"] : []),
+        ...(metaRows.length ? ["meta_ads_daily_revisions"] : []),
+      ].join("_and_") + (googleRows.length || metaRows.length ? "" : "_only"),
       attribution: "none",
       coverage: "not_verified",
     };
@@ -519,6 +568,41 @@ export default {
         }
         throw error;
       }
+    }
+    const metaHistory = /^\/v1\/meta\/accounts\/([0-9]{1,32})\/revisions$/.exec(url.pathname);
+    if (request.method === "GET" && metaHistory) {
+      if (url.search) return response("meta_invalid_query", 400);
+      return Response.json(await ledger.metaHistory(metaHistory[1]));
+    }
+    const metaReconcile = /^\/v1\/meta\/accounts\/([0-9]{1,32})\/reconcile$/.exec(url.pathname);
+    if (request.method === "POST" && metaReconcile) {
+      if (url.search) return response("meta_invalid_query", 400);
+      let input: unknown;
+      try { input = await request.json(); } catch { return response("invalid_json", 400); }
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        return response("meta_invalid_mapping", 400);
+      }
+      const form = input as Record<string, unknown>;
+      if (Object.keys(form).some((key) =>
+          !["product_id", "since", "until", "campaign_ids"].includes(key)) ||
+          !validId(form.product_id) || typeof form.since !== "string" ||
+          typeof form.until !== "string" || !Array.isArray(form.campaign_ids) ||
+          !form.campaign_ids.length || form.campaign_ids.some((value: unknown) =>
+            typeof value !== "string" || !/^[0-9]{1,32}$/.test(value)
+          ) || new Set(form.campaign_ids).size !== form.campaign_ids.length) {
+        return response("meta_invalid_mapping", 400);
+      }
+      const result = await ledger.reconcileMeta(
+        form.product_id, metaReconcile[1], form.since, form.until,
+        form.campaign_ids as string[], env.META_ACCESS_TOKEN
+      );
+      if ("error" in result) {
+        const failure = result as { error: string; error_status: number };
+        return response(failure.error, failure.error_status);
+      }
+      return Response.json(result, {
+        status: (result as { status: string }).status === "created" ? 201 : 200,
+      });
     }
     if (request.method === "GET" && url.pathname.startsWith("/v1/meta/")) {
       return handleMetaRequest(url, env.META_ACCESS_TOKEN);
