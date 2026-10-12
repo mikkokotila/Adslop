@@ -94,6 +94,38 @@ async function snapshot(id: string, token: string, accountId: string, adsetId?: 
 export async function handleMetaCampaignRequest(
   request: Request, url: URL, token: string | undefined,
 ): Promise<Response> {
+  if (url.pathname === "/v1/meta/targeting-interests") {
+    if (!token) return Response.json({error:"meta_not_configured"},{status:503});
+    if (request.method !== "GET") {
+      return Response.json({error:"meta_unsupported_campaign_operation"},{status:405});
+    }
+    const keys = [...url.searchParams.keys()];
+    const q = url.searchParams.get("q");
+    if (!q || !q.trim() || q.length > 80 || keys.length !== 1 || keys[0] !== "q") {
+      return Response.json({error:"meta_invalid_interest_query"},{status:400});
+    }
+    try {
+      const native = await graph("GET", "search", token, {type:"adinterest",q,limit:"25"});
+      if (!Array.isArray(native.data)) {
+        throw new MetaCampaignError("meta_invalid_native_response",502);
+      }
+      const interests = native.data.map(item => {
+        const value = obj(item);
+        if (!validId(value.id) || typeof value.name !== "string") {
+          throw new MetaCampaignError("meta_invalid_native_response",502);
+        }
+        return {id:value.id,name:value.name,
+          ...(Array.isArray(value.path) ? {path:value.path} : {})};
+      });
+      return Response.json({query:q,targeting_mode:"AUDIENCE_INTERESTS",
+        source:"meta_targeting_search",interests});
+    } catch (error) {
+      if (error instanceof MetaCampaignError) {
+        return Response.json({error:error.code},{status:error.status});
+      }
+      throw error;
+    }
+  }
   const route = /^\/v1\/meta\/accounts\/([1-9][0-9]{0,31})\/paused-audience-campaigns(?:\/([1-9][0-9]{0,31})(?:\/adsets\/([1-9][0-9]{0,31}))?)?$/.exec(url.pathname);
   if (!route) return Response.json({error:"meta_invalid_campaign_route"}, {status:404});
   if (!token) return Response.json({error:"meta_not_configured"}, {status:503});

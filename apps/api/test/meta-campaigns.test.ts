@@ -11,6 +11,27 @@ async function invoke(method: string, path = "", data?: object, token = "fixture
     ...(data ? {body:JSON.stringify(data)}:{})}),{...env,META_ACCESS_TOKEN:token} as Env);
 }
 afterEach(() => vi.unstubAllGlobals());
+
+it("discovers native interest IDs without treating search text as positive keyword matching",async()=>{
+  const fake=vi.fn(async(url:RequestInfo | URL,init?:RequestInit)=>{
+    const u=new URL(String(url));
+    expect(u.pathname).toBe("/v25.0/search");
+    expect(u.searchParams.get("type")).toBe("adinterest");
+    expect(u.searchParams.get("q")).toBe("astrology");
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer fixture");
+    return Response.json({data:[{id:"6000000000001",name:"Astrology",
+      path:["Interests","News and entertainment","Astrology"]}]});
+  });
+  vi.stubGlobal("fetch",fake);
+  const res=await worker.fetch(new Request("https://adslop.test/v1/meta/targeting-interests?q=astrology",{
+    headers:{Authorization:"Bearer test-only-economic-ledger"}
+  }),{...env,META_ACCESS_TOKEN:"fixture"} as Env);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({targeting_mode:"AUDIENCE_INTERESTS",
+    interests:[{id:"6000000000001",name:"Astrology"}]});
+  expect(fake).toHaveBeenCalledTimes(1);
+});
+
 it("creates paused Meta campaign and audience ad set with independent readback", async () => {
   const calls: Array<{path:string;body:string}> = [];
   const fake = vi.fn(async (url: RequestInfo | URL, init?:RequestInit) => {
