@@ -1,3 +1,8 @@
+# v0.9.0
+
+- Prepare paused Meta traffic campaigns and audience-targeted ad sets, with independent native readback and explicit non-keyword semantics.
+- Expose partial native writes as unverified without automatic mutation retries or paid activation.
+
 # v0.8.3
 
 - Use supported redirect handling for Meta reports in the Workers runtime without forwarding credentials.
