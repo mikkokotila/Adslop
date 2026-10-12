@@ -55,6 +55,27 @@ or incomplete upstream pages. The Meta API adapter is not live-validated until
 an authorized Graph token is provided and results are checked against Meta's
 own account reports. No ads are created, edited, or activated here.
 
+### Meta spend reconciliation
+
+After authorizing a Meta app for the selected ad account with an `ads_read`
+Graph API token, import native reported cost through
+`POST /v1/meta/accounts/{account_id}/reconcile` with
+`{"product_id":"your-product","since":"YYYY-MM-DD","until":"YYYY-MM-DD","campaign_ids":["native-campaign-id"]}`.
+The importer fetches independent account and campaign/day reports, checks that
+they reconcile exactly, and attributes **only explicitly selected campaigns**
+to the product. Missing or contradictory source records, manually entered Meta
+spend for the same product/currency, and reassigned native campaigns fail closed.
+Identical retries do not increase money-out; corrected source cost becomes a new
+revision. Inspect its history at `GET /v1/meta/accounts/{account_id}/revisions`.
+`GET /v1/economics` includes the latest imported Meta daily costs, with exact
+minor units and no campaign/adset/ad reporting-level double counting. The
+existing Google micro-unit precision and receipt/refund provenance are preserved.
+
+These figures are *Meta-reported advertising spend*, not invoice settlement or
+demonstrated incremental subscription revenue. The integration is not live
+validated until a real authorized Meta Graph account report can be compared
+with the same period in Ads Manager. No Meta ad mutation is implemented here.
+
 ## Local development
 
 The canonical working directory is `~/dev/Adslop`.

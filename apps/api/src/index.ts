@@ -645,7 +645,10 @@ export default {
         if (error instanceof GoogleJournalError) return response(error.code, error.status);
         throw error;
       }
-      if (result.status === "overlap") return response("google_ads_manual_spend_overlap", 409);
+      if (result.status === "overlap") {
+        return response(value.channel === "meta"
+          ? "meta_manual_spend_overlap" : "google_ads_manual_spend_overlap", 409);
+      }
       if (result.status === "conflict") return response("conflicting_event_id", 409);
       return Response.json({ ...result, event_id: value.event_id }, {
         status: result.status === "created" ? 201 : 200,

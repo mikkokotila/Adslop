@@ -1,3 +1,9 @@
+# v0.8.0
+
+- Reconcile complete native Meta daily campaign costs against reported account spend.
+- Preserve corrected Meta spend as append-only revisions without double-counting.
+- Reject conflicting product mappings, incomplete source reports and manual Meta overlaps.
+
 # v0.7.1
 
 - Grant the slice closeout job repository read access so private-repository checkout can verify merged issue evidence.

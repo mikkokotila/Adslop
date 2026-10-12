@@ -5,6 +5,7 @@
 import type { MetaSpendReport } from "./meta";
 
 export interface MetaRevision {
+  [key: string]: string | number;
   account_id: string;
   campaign_id: string;
   local_date: string;
