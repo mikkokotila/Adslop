@@ -147,7 +147,7 @@ async function graphPages(path: string, params: Record<string, string>, token: s
   return rows;
 }
 
-type MetaAccount = {
+export type MetaAccount = {
   account_id: string; name: string; currency: string;
   timezone_name: string; account_status: number | null;
 };
@@ -176,7 +176,7 @@ async function getAccount(id: string, token: string): Promise<MetaAccount> {
   return account;
 }
 
-type DailySpendRow = {
+export type DailySpendRow = {
   date_start: string; date_stop: string; spend_minor: string;
   entity_id: string; entity_name: string | null;
   impressions: string | null; clicks: string | null;
@@ -234,6 +234,49 @@ async function dailyInsights(id: string, level: MetaLevel, token: string,
   return parseSpendRows(data, level, account, day(since), day(until));
 }
 
+export type MetaSpendReport = {
+  account: MetaAccount;
+  since: string;
+  until: string;
+  level: MetaLevel;
+  graph_version: string;
+  observed_at: string;
+  account_spend_minor: string;
+  account_rows: DailySpendRow[];
+  rows: DailySpendRow[];
+  source: "meta_insights";
+  imported_to_ledger: false;
+  complete: true;
+  reporting: "platform_reported_not_billing_settlement";
+  breakdowns_additive_with_account: false;
+};
+
+/** One complete Meta Insights snapshot in the account's local calendar. */
+export async function readMetaSpendReport(
+  id: string, since: string, until: string, level: MetaLevel, token: string
+): Promise<MetaSpendReport> {
+  const accountIdValue = accountId(id);
+  const start = day(since), stop = day(until);
+  if (start > stop || stop - start > 30 * 86_400_000) {
+    throw new MetaReadError("meta_invalid_dates", 400);
+  }
+  const account = await getAccount(accountIdValue, token);
+  const accountRows = await dailyInsights(accountIdValue, "account", token, account, since, until);
+  const rows = level === "account" ? accountRows :
+    await dailyInsights(accountIdValue, level, token, account, since, until);
+  return {
+    account, since, until, level, graph_version: graphVersion,
+    observed_at: new Date().toISOString(),
+    account_spend_minor: accountRows.reduce(
+      (sum, row) => sum + BigInt(row.spend_minor), 0n
+    ).toString(),
+    rows, account_rows: accountRows,
+    source: "meta_insights", imported_to_ledger: false, complete: true,
+    reporting: "platform_reported_not_billing_settlement",
+    breakdowns_additive_with_account: false,
+  };
+}
+
 function reportResponse(body: unknown, status = 200): Response {
   return Response.json(body, {
     status, headers: { "Cache-Control": "no-store" },
@@ -267,24 +310,9 @@ export async function handleMetaRequest(url: URL, accessToken: string | undefine
       if (!rawId || !since || !until || !["account", "campaign", "adset", "ad"].includes(level)) {
         throw new MetaReadError("meta_invalid_query", 400);
       }
-      const id = accountId(rawId);
-      const start = day(since), stop = day(until);
-      if (start > stop || stop - start > 30 * 86_400_000) {
-        throw new MetaReadError("meta_invalid_dates", 400);
-      }
-      const account = await getAccount(id, accessToken);
-      const accountRows = await dailyInsights(id, "account", accessToken, account, since, until);
-      const selectedLevel = level as MetaLevel;
-      const rows = selectedLevel === "account" ? accountRows :
-        await dailyInsights(id, selectedLevel, accessToken, account, since, until);
-      return reportResponse({
-        account, since, until, level: selectedLevel,
-        graph_version: graphVersion, observed_at: new Date().toISOString(),
-        account_spend_minor: accountRows.reduce((sum, row) => sum + BigInt(row.spend_minor), 0n).toString(),
-        rows, source: "meta_insights", imported_to_ledger: false,
-        reporting: "platform_reported_not_billing_settlement",
-        breakdowns_additive_with_account: false,
-      });
+      return reportResponse(await readMetaSpendReport(
+        rawId, since, until, level as MetaLevel, accessToken
+      ));
     }
     return reportResponse({ error: "not_found" }, 404);
   } catch (error) {
