@@ -73,7 +73,9 @@ function parseObservation(input: unknown): Observation {
   };
 }
 
-type RecordResult = { status: "created" | "duplicate" | "conflict" | "overlap" };
+type RecordResult =
+  | { status: "created" | "duplicate" | "conflict" }
+  | { status: "overlap"; error: string };
 
 export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -153,7 +155,9 @@ export class MoneyLedger extends DurableObject<Env> {
       return this.ctx.storage.transactionSync(() => this.recordInTransaction(value));
     } catch (error) {
       if (error instanceof GoogleJournalError ||
-          error instanceof MetaJournalError) return { status: "overlap" };
+          error instanceof MetaJournalError) {
+        return { status: "overlap", error: error.code };
+      }
       throw error;
     }
   }
@@ -645,10 +649,7 @@ export default {
         if (error instanceof GoogleJournalError) return response(error.code, error.status);
         throw error;
       }
-      if (result.status === "overlap") {
-        return response(value.channel === "meta"
-          ? "meta_manual_spend_overlap" : "google_ads_manual_spend_overlap", 409);
-      }
+      if (result.status === "overlap") return response(result.error, 409);
       if (result.status === "conflict") return response("conflicting_event_id", 409);
       return Response.json({ ...result, event_id: value.event_id }, {
         status: result.status === "created" ? 201 : 200,
