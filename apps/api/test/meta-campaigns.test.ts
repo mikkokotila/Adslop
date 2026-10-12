@@ -51,7 +51,8 @@ it("creates paused Meta campaign and audience ad set with independent readback",
     }
     if (path.endsWith("/111")) return Response.json({id:"111",account_id:"1390405164595271",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
     if (path.endsWith("/222")) return Response.json({id:"222",account_id:"1390405164595271",status:"PAUSED",
-      campaign_id:"111",daily_budget:"500", targeting:{
+      campaign_id:"111",daily_budget:"500",optimization_goal:"LINK_CLICKS",
+      billing_event:"IMPRESSIONS",targeting:{
         geo_locations:{countries:["US"]},interests:[{id:"6000000000001"}]}});
     throw Error("unexpected graph path");
   });
@@ -92,4 +93,53 @@ it("marks a partially created campaign unverified rather than retrying",async()=
   expect(await res.json()).toMatchObject({status:"write_unverified",campaign_id:"111",
     paid_delivery_authorized:false});
   expect(fake.mock.calls.filter(x=>String(x[0]).endsWith("/adsets"))).toHaveLength(1);
+});
+
+it("rejects numeric budget without mutating anything",async()=>{
+  const fake=vi.fn();
+  vi.stubGlobal("fetch",fake);
+  const res=await invoke("POST","",{...config,daily_budget_minor:500});
+  expect(res.status).toBe(400);
+  expect(fake).not.toHaveBeenCalled();
+});
+it("returns a distinct 429 for Meta throttling",async()=>{
+  const fake=vi.fn(async()=>Response.json({error:{code:17}},{status:429}));
+  vi.stubGlobal("fetch",fake);
+  const res=await invoke("POST","",config);
+  expect(res.status).toBe(429);
+  expect(await res.json()).toMatchObject({error:"meta_rate_limited",
+    paid_delivery_authorized:false});
+  expect(fake).toHaveBeenCalledTimes(1);
+});
+it("does not verify expanded audience or altered delivery controls",async()=>{
+  for(const altered of [
+    {optimization_goal:"IMPRESSIONS"},
+    {targeting:{geo_locations:{countries:["US","CA"]},
+      interests:[{id:"6000000000001"}]}},
+    {targeting:{geo_locations:{countries:["US"]},
+      interests:[{id:"6000000000001"},{id:"6000000000002"}]}},
+    {account_id:"999"},
+  ]) {
+    const fake=vi.fn(async(url:RequestInfo | URL)=>{
+      const path=new URL(String(url)).pathname;
+      if(path.endsWith("/campaigns")) return Response.json({id:"111"});
+      if(path.endsWith("/adsets")) return Response.json({id:"222"});
+      if(path.endsWith("/111")) return Response.json({
+        id:"111",account_id:"1390405164595271",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+      if(path.endsWith("/222")) return Response.json({
+        id:"222",account_id:"1390405164595271",campaign_id:"111",
+        status:"PAUSED",daily_budget:"500",optimization_goal:"LINK_CLICKS",
+        billing_event:"IMPRESSIONS",targeting:{
+          geo_locations:{countries:["US"]},interests:[{id:"6000000000001"}]},
+        ...altered});
+      throw Error("unexpected graph path");
+    });
+    vi.stubGlobal("fetch",fake);
+    const res=await invoke("POST","",config);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({status:"write_unverified",
+      campaign_id:"111",paid_delivery_authorized:false});
+    expect(fake.mock.calls.filter(x=>String(x[0]).endsWith("/adsets"))).toHaveLength(1);
+    vi.unstubAllGlobals();
+  }
 });

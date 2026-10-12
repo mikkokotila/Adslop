@@ -29,7 +29,8 @@ function parse(value: unknown) {
     "targeting_mode"];
   if (Object.keys(v).some(k => !allowed.includes(k)) ||
       v.targeting_mode !== "AUDIENCE_INTERESTS" ||
-      !/^[1-9][0-9]{0,9}$/.test(String(v.daily_budget_minor))) {
+      (typeof v.daily_budget_minor !== "string" ||
+       !/^[1-9][0-9]{0,9}$/.test(v.daily_budget_minor))) {
     throw new MetaCampaignError("meta_unsupported_campaign_configuration", 400);
   }
   if (!Array.isArray(v.countries) || v.countries.length < 1 || v.countries.length > 10 ||
@@ -66,6 +67,7 @@ async function graph(method: "GET" | "POST", path: string, token: string,
     if (reply.status >= 500 || reply.status >= 300 && reply.status < 400) {
       throw new MetaCampaignError("meta_upstream_write_uncertain", 502, method === "POST");
     }
+    if (reply.status === 429) throw new MetaCampaignError("meta_rate_limited", 429);
     throw new MetaCampaignError(reply.status === 401 || reply.status === 403
       ? "meta_access_denied" : "meta_upstream_rejected", 502);
   }
@@ -85,7 +87,8 @@ async function snapshot(id: string, token: string, accountId: string, adsetId?: 
     fields: "id,account_id,name,status,effective_status,campaign_id,daily_budget,targeting,optimization_goal,billing_event",
   });
   if (adset.id !== adsetId || adset.campaign_id !== id || adset.account_id !== accountId ||
-      adset.status !== "PAUSED") {
+      adset.status !== "PAUSED" || adset.optimization_goal !== "LINK_CLICKS" ||
+      adset.billing_event !== "IMPRESSIONS") {
     throw new MetaCampaignError("meta_readback_mismatch", 409);
   }
   return { campaign, adset };
@@ -177,6 +180,8 @@ export async function handleMetaCampaignRequest(
     const countryValues = geo?.countries;
     if (!native.adset || native.adset.daily_budget !== config.budget ||
         !Array.isArray(countryValues) ||
+        countryValues.length !== config.countries.length ||
+        actualIds.length !== config.interests.length ||
         config.countries.some(v => !countryValues.includes(v)) ||
         config.interests.some(v => !actualIds.includes(v))) {
       throw new MetaCampaignError("meta_readback_mismatch",409,true,campaignId);
