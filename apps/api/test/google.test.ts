@@ -11,7 +11,6 @@ const credentials = {
   GOOGLE_ADS_CLIENT_ID: 'test-client-id',
   GOOGLE_ADS_CLIENT_SECRET: 'test-client-secret',
   GOOGLE_ADS_REFRESH_TOKEN: 'test-refresh-token',
-  GOOGLE_ADS_DEVELOPER_TOKEN: 'test-developer-token',
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: manager,
 };
 
@@ -55,7 +54,7 @@ function stubAds(options: {
     if (options.adsNetworkFailure) throw new Error('private-network-detail');
     if (options.badJson) return new Response('invalid upstream document', { status: 200 });
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-access-token');
-    expect(new Headers(init?.headers).get('developer-token')).toBe('test-developer-token');
+    expect(new Headers(init?.headers).get('developer-token')).toBeNull();
     if (options.quota) {
       return Response.json({ error: { status: 'RESOURCE_EXHAUSTED' } }, {
         status: 429, headers: { 'request-id': 'quota-fixture-id' },
@@ -158,6 +157,17 @@ function stubAds(options: {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('authenticates without a developer token or developer-token header', async () => {
+  const requests = stubAds();
+  const first = await get('/v1/google-ads/accounts');
+  expect(first.status).toBe(200);
+  expect(requests.length).toBeGreaterThan(0);
+  const legacy = await get('/v1/google-ads/accounts', {
+    ...credentials, GOOGLE_ADS_DEVELOPER_TOKEN: 'unused-legacy-value',
+  });
+  expect(legacy.status).toBe(200);
+});
 
 it('refreshes OAuth and discovers managed accounts with native currencies and zones', async () => {
   const calls = stubAds();
