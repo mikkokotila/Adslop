@@ -1,3 +1,7 @@
+# v0.8.2
+
+- Deploy the existing Cloudflare Worker after merges to main while preserving the money ledger, Bunny settings, and secrets.
+
 # v0.8.1
 
 - Remove the retired Google Ads developer-token prerequisite and header from account reads, cost reconciliation, and paused Search campaign writes.

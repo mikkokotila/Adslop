@@ -14,7 +14,7 @@ Google Ads source reporting, revision-aware money-out imports, and pause-only Se
 
 ## Current implementation
 
-The foundation includes a local Cloudflare Worker economic API that records explicitly submitted subscription receipts, refunds, ad spend, and credits and calculates their difference without assigning subscription revenue to an ad platform. Duplicate event identities are handled transactionally and every admitted observation is retrievable. This API is not deployed and is not yet connected to actual advertising or billing accounts. It does not generate revenue on its own.
+The foundation includes a local Cloudflare Worker economic API that records explicitly submitted subscription receipts, refunds, ad spend, and credits and calculates their difference without assigning subscription revenue to an ad platform. Duplicate event identities are handled transactionally and every admitted observation is retrievable. The Bunny collection preview is deployed; live advertising and billing account integration remains unverified. It does not generate revenue on its own.
 
 The planned Bunny importer polls Logging API v2 every minute and only admits HMAC-signed subscription receipts and refunds. A public pixel request cannot supply authoritative subscription revenue without a trusted commerce signature. The source Pull Zone ID, access key, event host, and signing key are provided as Cloudflare secrets/settings; none are in source control. The system retains per-request dispositions and rejects missing or malformed evidence. The trusted sender signs the URL query's `URLSearchParams.toString()` over `schema=1`, `product_id`, `source`, `event_id`, `kind`, `amount_minor`, `currency`, and `occurred_at` in that order using HMAC-SHA256, then appends `sig` as lowercase hexadecimal. Never include customer identifiers or other personal data in these URLs. The API exposes `POST /v1/bunny/poll`, `GET /v1/bunny/coverage?pull_zone_id=...`, and `GET /v1/bunny/records/{request_id}?pull_zone_id=...` behind the same bearer token. Live ingestion still requires a Bunny zone and a trusted subscription receipt source.
 
@@ -76,6 +76,20 @@ These figures are *Meta-reported advertising spend*, not invoice settlement or
 demonstrated incremental subscription revenue. The integration is not live
 validated until a real authorized Meta Graph account report can be compared
 with the same period in Ads Manager. No Meta ad mutation is implemented here.
+
+## Cloudflare deployment
+
+Merges to `main` run `.github/workflows/deploy_cloudflare.yml` with the locked
+Worker toolchain and `apps/api/wrangler.deploy.jsonc`. The deployment updates
+`adslop-api-preview` while preserving its existing MoneyLedger SQLite namespace,
+Bunny Pull Zone, one-minute schedule, and encrypted Worker secrets. Each version
+records the merged commit SHA. Deployments serialize and skip superseded heads.
+
+GitHub Actions requires repository secret `CLOUDFLARE_API_TOKEN`; the existing
+account ID is pinned in the deployment configuration. Scope the token to Worker
+deployment in that account. Deployment retains dashboard-managed variables. Billing and advertising tokens stay in encrypted
+Worker secrets; they are never copied into the repository or deployment logs.
+The workflow can also be dispatched from `main` after a deployment failure.
 
 ## Local development
 
