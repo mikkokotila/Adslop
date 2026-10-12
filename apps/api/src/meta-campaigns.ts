@@ -72,19 +72,20 @@ async function graph(method: "GET" | "POST", path: string, token: string,
   try { return obj(await reply.json()); }
   catch { throw new MetaCampaignError("meta_invalid_native_response", 502, method === "POST"); }
 }
-async function snapshot(id: string, token: string, adsetId?: string) {
+async function snapshot(id: string, token: string, accountId: string, adsetId?: string) {
   const campaign = await graph("GET", id, token, {
-    fields: "id,name,status,effective_status,objective,special_ad_categories",
+    fields: "id,account_id,name,status,effective_status,objective,special_ad_categories",
   });
-  if (campaign.id !== id || campaign.status !== "PAUSED" ||
+  if (campaign.id !== id || campaign.account_id !== accountId || campaign.status !== "PAUSED" ||
       campaign.objective !== "OUTCOME_TRAFFIC") {
     throw new MetaCampaignError("meta_readback_mismatch", 409);
   }
   if (!adsetId) return { campaign };
   const adset = await graph("GET", adsetId, token, {
-    fields: "id,name,status,effective_status,campaign_id,daily_budget,targeting,optimization_goal,billing_event",
+    fields: "id,account_id,name,status,effective_status,campaign_id,daily_budget,targeting,optimization_goal,billing_event",
   });
-  if (adset.id !== adsetId || adset.campaign_id !== id || adset.status !== "PAUSED") {
+  if (adset.id !== adsetId || adset.campaign_id !== id || adset.account_id !== accountId ||
+      adset.status !== "PAUSED") {
     throw new MetaCampaignError("meta_readback_mismatch", 409);
   }
   return { campaign, adset };
@@ -100,7 +101,7 @@ export async function handleMetaCampaignRequest(
   let campaignId: string | null = null;
   try {
     if (request.method === "GET" && route[2]) {
-      const native = await snapshot(route[2], token, route[3]);
+      const native = await snapshot(route[2], token, route[1], route[3]);
       return Response.json({status:"verified_paused", targeting_mode:"AUDIENCE_INTERESTS",
         campaign_id:route[2], ...(route[3] ? {adset_id:route[3]} : {}),
         native, paid_delivery_authorized:false});
@@ -120,7 +121,7 @@ export async function handleMetaCampaignRequest(
     });
     if (!validId(campaign.id)) throw new MetaCampaignError("meta_campaign_identity_uncertain", 502, true);
     campaignId = campaign.id;
-    await snapshot(campaignId, token);
+    await snapshot(campaignId, token, route[1]);
     const adset = await graph("POST", "act_" + route[1] + "/adsets", token, {
       name:config.name + " | Audience",
       campaign_id:campaignId, daily_budget:config.budget, status:"PAUSED",
@@ -132,7 +133,7 @@ export async function handleMetaCampaignRequest(
       }),
     });
     if (!validId(adset.id)) throw new MetaCampaignError("meta_adset_identity_uncertain", 502, true,campaignId);
-    const native = await snapshot(campaignId, token, adset.id);
+    const native = await snapshot(campaignId, token, route[1], adset.id);
     const actualTargeting = native.adset?.targeting;
     const actual = actualTargeting && typeof actualTargeting === "object" &&
       !Array.isArray(actualTargeting) ? actualTargeting as Obj : null;

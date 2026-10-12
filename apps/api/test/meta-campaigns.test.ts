@@ -28,8 +28,8 @@ it("creates paused Meta campaign and audience ad set with independent readback",
       expect(body).toContain("daily_budget=500");
       return Response.json({id:"222"});
     }
-    if (path.endsWith("/111")) return Response.json({id:"111",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
-    if (path.endsWith("/222")) return Response.json({id:"222",status:"PAUSED",
+    if (path.endsWith("/111")) return Response.json({id:"111",account_id:"1390405164595271",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if (path.endsWith("/222")) return Response.json({id:"222",account_id:"1390405164595271",status:"PAUSED",
       campaign_id:"111",daily_budget:"500", targeting:{
         geo_locations:{countries:["US"]},interests:[{id:"6000000000001"}]}});
     throw Error("unexpected graph path");
@@ -61,7 +61,7 @@ it("marks a partially created campaign unverified rather than retrying",async()=
   const fake=vi.fn(async(url:RequestInfo | URL)=>{
     const path=new URL(String(url)).pathname;
     if(path.endsWith("/campaigns")) return Response.json({id:"111"});
-    if(path.endsWith("/111")) return Response.json({id:"111",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if(path.endsWith("/111")) return Response.json({id:"111",account_id:"1390405164595271",status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
     if(path.endsWith("/adsets")) return Response.json({error:{message:"denied"}},{status:400});
     throw Error("unexpected graph path");
   });
