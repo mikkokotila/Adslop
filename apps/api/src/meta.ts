@@ -242,6 +242,7 @@ export type MetaSpendReport = {
   graph_version: string;
   observed_at: string;
   account_spend_minor: string;
+  account_rows: DailySpendRow[];
   rows: DailySpendRow[];
   source: "meta_insights";
   imported_to_ledger: false;
@@ -269,7 +270,8 @@ export async function readMetaSpendReport(
     account_spend_minor: accountRows.reduce(
       (sum, row) => sum + BigInt(row.spend_minor), 0n
     ).toString(),
-    rows, source: "meta_insights", imported_to_ledger: false, complete: true,
+    rows, account_rows: accountRows,
+    source: "meta_insights", imported_to_ledger: false, complete: true,
     reporting: "platform_reported_not_billing_settlement",
     breakdowns_additive_with_account: false,
   };

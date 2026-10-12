@@ -62,7 +62,8 @@ Graph API token, import native reported cost through
 `POST /v1/meta/accounts/{account_id}/reconcile` with
 `{"product_id":"your-product","since":"YYYY-MM-DD","until":"YYYY-MM-DD","campaign_ids":["native-campaign-id"]}`.
 The importer fetches independent account and campaign/day reports, checks that
-they reconcile exactly, and attributes **only explicitly selected campaigns**
+they reconcile by **each local day**, not merely by period total, and attributes
+**only explicitly selected campaigns**
 to the product. Missing or contradictory source records, manually entered Meta
 spend for the same product/currency, and reassigned native campaigns fail closed.
 Identical retries do not increase money-out; corrected source cost becomes a new

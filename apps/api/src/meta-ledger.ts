@@ -103,12 +103,29 @@ export class MetaCostJournal {
         report.complete !== true || report.level !== "campaign" ||
         !/^[A-Z]{3}$/.test(report.account.currency) ||
         !report.account.timezone_name ||
+        !Array.isArray(report.account_rows) ||
         !Array.isArray(report.rows)) {
       throw new MetaJournalError("meta_incomplete_source_report", 502);
     }
     const account = identity(report.account.account_id);
     const accountTotal = minorAmount(report.account_spend_minor);
+    const sourceByDay = new Map<string, bigint>();
+    for (const row of report.account_rows) {
+      if (identity(row.entity_id) !== account ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(row.date_start) ||
+          row.date_start !== row.date_stop ||
+          row.date_start < report.since || row.date_start > report.until ||
+          sourceByDay.has(row.date_start)) {
+        throw new MetaJournalError("meta_invalid_account_day", 502);
+      }
+      sourceByDay.set(row.date_start, minorAmount(row.spend_minor));
+    }
+    const sourceSum = [...sourceByDay.values()].reduce((sum, n) => sum + n, 0n);
+    if (sourceSum !== accountTotal) {
+      throw new MetaJournalError("meta_account_daily_spend_break", 502);
+    }
     const entries = new Map<string, { campaign: string; date: string; amount: bigint }>();
+    const campaignsByDay = new Map<string, bigint>();
     let allCampaigns = 0n;
     for (const row of report.rows) {
       const campaign = identity(row.entity_id);
@@ -121,9 +138,15 @@ export class MetaCostJournal {
       if (entries.has(key)) throw new MetaJournalError("meta_duplicate_source_day", 502);
       const amount = minorAmount(row.spend_minor);
       entries.set(key, { campaign, date: row.date_start, amount });
+      campaignsByDay.set(
+        row.date_start, (campaignsByDay.get(row.date_start) ?? 0n) + amount
+      );
       allCampaigns += amount;
     }
-    if (accountTotal !== allCampaigns) {
+    const dates = new Set([...sourceByDay.keys(), ...campaignsByDay.keys()]);
+    if (accountTotal !== allCampaigns ||
+        [...dates].some((date) =>
+          (sourceByDay.get(date) ?? 0n) !== (campaignsByDay.get(date) ?? 0n))) {
       throw new MetaJournalError("meta_account_campaign_spend_break", 409);
     }
     const existingManual = this.sql.exec<{ present: number }>(

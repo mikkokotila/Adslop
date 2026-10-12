@@ -31,6 +31,8 @@ type NativeFixture = {
   baseline?: string;
   oneDate?: string;
   accountDate?: string;
+  accountDayOne?: string;
+  accountDayTwo?: string;
   range?: { since: string; until: string };
   additionalDay?: string | null;
 };
@@ -41,13 +43,11 @@ function native(options: NativeFixture = {}) {
   const date = options.oneDate ?? "2026-10-08";
   const accountDate = options.accountDate ?? date;
   const extra = options.additionalDay;
-  const total = options.baseline ?? (
-    BigInt(one.replace(".", "")) +
-    (two === null ? 0n : BigInt(two.replace(".", ""))) +
-    (extra ? BigInt(extra.replace(".", "")) : 0n)
-  ).toString();
-  const amount = options.baseline ?? (BigInt(total) / 100n).toString() +
-    "." + (BigInt(total) % 100n).toString().padStart(2, "0");
+  const firstCents = BigInt(one.replace(".", "")) +
+    (two === null ? 0n : BigInt(two.replace(".", "")));
+  const firstAmount = options.accountDayOne ?? options.baseline ??
+    (firstCents / 100n).toString() +
+    "." + (firstCents % 100n).toString().padStart(2, "0");
   const seen: string[] = [];
 
   vi.stubGlobal("fetch", vi.fn(async (target: URL | RequestInfo, init?: RequestInit) => {
@@ -71,7 +71,11 @@ function native(options: NativeFixture = {}) {
     seen.push(level ?? "");
     if (level === "account") return Response.json({ data: [
       { account_id: account, date_start: accountDate, date_stop: accountDate,
-        spend: amount, impressions: "10", clicks: "2" },
+        spend: firstAmount, impressions: "10", clicks: "2" },
+      ...(extra === null || extra === undefined ? [] : [{
+        account_id: account, date_start: "2026-10-09", date_stop: "2026-10-09",
+        spend: options.accountDayTwo ?? extra, impressions: "8", clicks: "1",
+      }]),
     ] });
     if (level === "campaign") {
       const rows = [
@@ -156,6 +160,19 @@ it("rejects report-total breaks without changing ledger money", async () => {
   expect((await (await history()).json())).toEqual({ account_id: account, revisions: [] });
   expect((await (await economics()).json())).toMatchObject({
     advertising_spend_minor: 0, difference_minor: 0,
+  });
+  // Entire-period totals can agree while the daily source allocation is wrong.
+  vi.unstubAllGlobals();
+  const range = { since: "2026-10-08", until: "2026-10-09" };
+  native({ two: null, additionalDay: "2.00",
+    accountDayOne: "4.01", accountDayTwo: "3.00", range });
+  const dailyMismatch = await report({ ...mapping, ...range });
+  expect(dailyMismatch.status).toBe(409);
+  expect(await dailyMismatch.json()).toEqual({
+    error: "meta_account_campaign_spend_break",
+  });
+  expect((await (await history()).json())).toEqual({
+    account_id: account, revisions: [],
   });
 });
 
