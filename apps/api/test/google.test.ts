@@ -163,9 +163,8 @@ it('authenticates without a developer token or developer-token header', async ()
   const first = await get('/v1/google-ads/accounts');
   expect(first.status).toBe(200);
   expect(requests.length).toBeGreaterThan(0);
-  const legacy = await get('/v1/google-ads/accounts', {
-    ...credentials, GOOGLE_ADS_DEVELOPER_TOKEN: 'unused-legacy-value',
-  });
+  const legacyCredentials = { ...credentials, GOOGLE_ADS_DEVELOPER_TOKEN: 'unused-legacy-value' };
+  const legacy = await get('/v1/google-ads/accounts', legacyCredentials);
   expect(legacy.status).toBe(200);
 });
 
