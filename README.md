@@ -32,6 +32,39 @@ To verify the first executable money-in/money-out capability, run `corepack pnpm
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 
+## Meta paused image ads
+
+`GET /v1/meta/accounts/{account_id}/creative-assets` reads the account, eligible advertising Pages, native image hashes, campaigns and granted token permissions. Each collection reports `available` or `unavailable`; an inaccessible Page catalog is not an empty list. Page access tokens are never returned. This inventory is read-only.
+
+`POST /v1/meta/accounts/{account_id}/images` accepts `{ "image_base64": "<PNG-or-JPEG-bytes-as-base64>" }`, up to 4 MiB decoded. It uploads the image to Meta, retains a SHA-256 of the submitted bytes and independently queries the account image by returned hash. Use an actual authorized product image, not a fabricated customer or chart.
+
+`POST /v1/meta/accounts/{account_id}/paused-ads` accepts this shape (IDs and hash must come from native account evidence):
+
+```json
+{
+  "name": "Eightchord | Chinese zodiac | Paused",
+  "campaign_id": "<native-campaign-id>",
+  "adset_id": "<native-adset-id>",
+  "page_id": "<eligible-Page-id>",
+  "image_hash": "<native-image-hash>",
+  "final_url": "https://eightchord.com/",
+  "primary_text": "Explore your four Chinese zodiac signs with Eightchord.",
+  "headline": "Your Chinese zodiac chart",
+  "description": "Explore Eightchord.",
+  "parent_expectation": {
+    "daily_budget_minor": "500",
+    "countries": ["US"],
+    "interest_ids": ["<native-interest-id>"]
+  }
+}
+```
+
+Both POST routes require `Idempotency-Key`, a unique 1–128-character operation name. Repeating the **same path and exact request body** with the same account/key returns the stored result without resending external writes. Reusing the key with different input returns `409 meta_idempotency_conflict`. An interrupted operation returns `write_unverified`; inspect native inventory rather than retrying a create under a new key. The existing Durable Object stores request hashes and safe results, not credentials or the uploaded image bytes.
+
+The ad path checks account ownership, PAUSED campaign/ad-set parents, non-special-category traffic configuration, exact requested country/interest sets and budget, eligible Page, and account-owned image. It creates a link creative, reads back its Page, image, text and destination, rechecks the parents, and creates the ad **PAUSED**. A final independent read verifies ad/creative/parent identities and copy. `GET /v1/meta/accounts/{account_id}/paused-ads/{ad_id}` returns current native paused state; it does not claim comparison with an unprovided historical request. Ambiguous writes retain every acknowledged image/creative/ad ID and never retry automatically. Safe upstream codes and trace IDs distinguish permission failures from missing data without returning secret-bearing messages.
+
+A verified paused configuration is **not approval to run, proof of platform ad review, or proof that Meta delivery expansion is disabled**. The API reports `launch_ready: false`; review effective placements, expansion and consent/payment readiness separately before any future activation. No route activates an ad. Existing audience-preparation routes remain distinct; image/ad retry protection does not retroactively make campaign/ad-set creation idempotent. Live Eightchord Page grants and image/ad results remain unverified until authenticated account execution succeeds.
+
 ## Meta paused audience preparation
 
 First discover genuine Meta interest IDs with authenticated `GET /v1/meta/targeting-interests?q=astrology`. The response records `source=meta_targeting_search`, `targeting_mode=AUDIENCE_INTERESTS`, and each source ID/name. This searches the interest catalog rather than specifying positive query keywords.

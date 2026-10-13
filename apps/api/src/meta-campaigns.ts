@@ -5,7 +5,8 @@ type Obj = Record<string, unknown>;
 
 class MetaCampaignError extends Error {
   constructor(readonly code: string, readonly status: number, readonly uncertain = false,
-    readonly campaignId: string | null = null) { super(code); }
+    readonly campaignId: string | null = null,
+    readonly source: { upstream_code?: number; upstream_subcode?: number; request_id?: string } = {}) { super(code); }
 }
 function obj(value: unknown): Obj {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -68,9 +69,23 @@ async function graph(method: "GET" | "POST", path: string, token: string,
     if (reply.status >= 500 || reply.status >= 300 && reply.status < 400) {
       throw new MetaCampaignError("meta_upstream_write_uncertain", 502, method === "POST");
     }
-    if (reply.status === 429) throw new MetaCampaignError("meta_rate_limited", 429);
-    throw new MetaCampaignError(reply.status === 401 || reply.status === 403
-      ? "meta_access_denied" : "meta_upstream_rejected", 502);
+    // Keep only numeric error codes and trace IDs, never upstream messages or tokens.
+    let raw: unknown;
+    try { raw = await reply.json(); }
+    catch { throw new MetaCampaignError("meta_invalid_native_response", 502); }
+    const failure = raw && typeof raw === "object" ? (raw as Obj).error : null;
+    const detail = failure && typeof failure === "object" ? failure as Obj : {};
+    const source = {
+      ...(typeof detail.code === "number" ? { upstream_code: detail.code } : {}),
+      ...(typeof detail.error_subcode === "number" ? { upstream_subcode: detail.error_subcode } : {}),
+      ...(typeof detail.fbtrace_id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(detail.fbtrace_id) &&
+          !detail.fbtrace_id.includes(token) ? { request_id: detail.fbtrace_id } : {}),
+    };
+    const throttled = reply.status === 429 || [4, 17, 32, 613, 80004].includes(Number(detail.code));
+    if (throttled) throw new MetaCampaignError("meta_rate_limited", 429, false, null, source);
+    throw new MetaCampaignError(reply.status === 401 || reply.status === 403 ||
+      [10, 190, 200].includes(Number(detail.code)) ? "meta_access_denied" : "meta_upstream_rejected",
+      reply.status === 401 || reply.status === 403 ? reply.status : 502, false, null, source);
   }
   try { return obj(await reply.json()); }
   catch { throw new MetaCampaignError("meta_invalid_native_response", 502, method === "POST"); }
@@ -211,3 +226,5 @@ export async function handleMetaCampaignRequest(
     throw error;
   }
 }
+
+export { graph as metaGraph, snapshot as readPausedMetaScope, MetaCampaignError };
