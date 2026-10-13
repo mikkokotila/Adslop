@@ -5,6 +5,7 @@ import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
 import { pausedSearchCampaigns } from "./google-campaigns";
 import { handleMetaRequest, readMetaSpendReport, MetaReadError } from "./meta";
 import { handleMetaCampaignRequest } from "./meta-campaigns";
+import { handleMetaAdRequest } from "./meta-ads";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -85,6 +86,12 @@ export class MoneyLedger extends DurableObject<Env> {
     new GoogleCostJournal(this.ctx.storage.sql).create();
     new MetaCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS meta_ad_operations (
+        request_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+        state TEXT NOT NULL, result TEXT, http_status INTEGER
+      )
+    `);
+    this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS observations (
         product_id TEXT NOT NULL,
         source TEXT NOT NULL,
@@ -124,6 +131,52 @@ export class MoneyLedger extends DurableObject<Env> {
         to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
       )
     `);
+  }
+
+  async metaAdWrite(path: string, key: string, body: string, token?: string): Promise<{ body: string; status: number }> {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path + "\n" + body));
+    const fingerprint = [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, "0")).join("");
+    const reserved = this.ctx.storage.transactionSync(() => {
+      const old = this.ctx.storage.sql.exec<{
+        fingerprint: string; state: string; result: string | null; http_status: number | null;
+      }>("SELECT * FROM meta_ad_operations WHERE request_key=?", key).toArray()[0];
+      if (old) return old;
+      this.ctx.storage.sql.exec("INSERT INTO meta_ad_operations VALUES (?, ?, 'pending', NULL, NULL)", key, fingerprint);
+      return null;
+    });
+    if (reserved) {
+      if (reserved.fingerprint !== fingerprint) return {
+        body: JSON.stringify({ error: "meta_idempotency_conflict" }), status: 409,
+      };
+      if (reserved.state === "complete" && reserved.result !== null && reserved.http_status !== null) {
+        return { body: reserved.result, status: reserved.http_status };
+      }
+      return { body: reserved.result ?? JSON.stringify({ error: "meta_operation_incomplete", status: "write_unverified",
+        operation_id: key, paid_delivery_authorized: false }), status: 409 };
+    }
+    let result: { body: string; status: number };
+    try {
+      const request = new Request("https://adslop.internal" + path, { method: "POST", body });
+      const reply = await handleMetaAdRequest(request, new URL(request.url), token, known => {
+        // Persist acknowledgments before the next external operation, not only at final success.
+        const checkpoint = JSON.stringify({ error: "meta_operation_incomplete", status: "write_unverified",
+          operation_id: key, ...known, paid_delivery_authorized: false });
+        this.ctx.storage.sql.exec("UPDATE meta_ad_operations SET result=? WHERE request_key=?", checkpoint, key);
+      });
+      result = { body: await reply.text(), status: reply.status };
+    } catch {
+      // A lost response or runtime failure is not permission to resend an external write.
+      const checkpoint = this.ctx.storage.sql.exec<{ result: string | null }>(
+        "SELECT result FROM meta_ad_operations WHERE request_key=?", key
+      ).toArray()[0];
+      result = { body: checkpoint?.result ?? JSON.stringify({ error: "meta_operation_unverified", status: "write_unverified",
+        operation_id: key, paid_delivery_authorized: false }), status: 502 };
+    }
+    this.ctx.storage.sql.exec(
+      "UPDATE meta_ad_operations SET state='complete', result=?, http_status=? WHERE request_key=?",
+      result.body, result.status, key
+    );
+    return result;
   }
 
   private recordInTransaction(value: Observation): RecordResult {
@@ -610,6 +663,21 @@ export default {
       return Response.json(result, {
         status: (result as { status: string }).status === "created" ? 201 : 200,
       });
+    }
+    const metaAd = /^\/v1\/meta\/accounts\/([1-9][0-9]{0,31})\/(creative-assets|images|paused-ads)(?:\/([1-9][0-9]{0,31}))?$/.exec(url.pathname);
+    if (metaAd) {
+      if (request.method === "POST" && !metaAd[3] && ["images", "paused-ads"].includes(metaAd[2])) {
+        if (url.search) return response("meta_invalid_query", 400);
+        const key = request.headers.get("Idempotency-Key");
+        if (!key || !/^[A-Za-z0-9_.:-]{1,128}$/.test(key)) return response("meta_idempotency_key_required", 400);
+        const body = await request.text();
+        if (body.length > 6_000_000) return response("meta_request_too_large", 413);
+        const result = await ledger.metaAdWrite(url.pathname, metaAd[1] + ":" + key, body, env.META_ACCESS_TOKEN);
+        return new Response(result.body, { status: result.status, headers: {
+          "Content-Type": "application/json", "Cache-Control": "no-store", "Idempotency-Key": key,
+        } });
+      }
+      return handleMetaAdRequest(request, url, env.META_ACCESS_TOKEN);
     }
     if (url.pathname === "/v1/meta/targeting-interests" ||
         (url.pathname.startsWith("/v1/meta/accounts/") &&

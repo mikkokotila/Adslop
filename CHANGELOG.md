@@ -1,3 +1,9 @@
+# v0.10.0
+
+- Discover eligible Meta Pages and account images without exposing Page tokens.
+- Create paused image ads only after verifying native parents, Page, image, copy and destination.
+- Preserve native write identities and persist operation results to prevent duplicate image, creative or ad writes on retries.
+
 # v0.9.0
 
 - Prepare paused Meta traffic campaigns and audience-targeted ad sets, with independent native readback and explicit non-keyword semantics.
