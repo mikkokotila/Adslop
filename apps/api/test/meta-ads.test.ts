@@ -207,7 +207,7 @@ it("returns explicit partial discovery when Page entitlement is unavailable", as
   const value = await result.json();
   expect(value).toMatchObject({ complete: false, pages: { status: "unavailable", error: "meta_access_denied",
     upstream_code: 200, request_id: "page-trace" }, images: { status: "available" } });
-  expect(value.pages).not.toHaveProperty("rows");
+  expect(value).not.toHaveProperty("pages.rows");
 });
 it("rejects an off-origin paging destination without sending credentials there", async () => {
   const native = mock({ unsafeNext: true });
