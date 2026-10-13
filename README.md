@@ -178,7 +178,6 @@ Every delivery PR closes one open slice issue, stays within its declared file sc
 
 The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
 
-
 ## Paddle subscription-cash integration
 
 Paddle was selected for Eightchord on 13 October 2026. This implementation is a receipt adapter, not checkout or paid-plan fulfillment. It makes no Paddle writes and does not authorize a charge. Live acceptance requires genuine merchant configuration and source-backed tests; only configuration/denial tests are currently present; signature-success and monetary-admission regressions remain incomplete.
