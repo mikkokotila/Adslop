@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { reset, evictAllDurableObjects } from "cloudflare:test";
+import { runInDurableObject, evictAllDurableObjects } from "cloudflare:test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 
@@ -96,12 +96,14 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
   vi.stubGlobal("fetch", fake);
   return { calls, mutations, fake };
 }
-beforeEach(async () => { await reset(); });
-afterEach(async () => {
-  // Gracefully drain output/storage gates before the next destructive reset.
-  await evictAllDurableObjects();
-  vi.unstubAllGlobals();
+beforeEach(async () => {
+  // Only this journal is stateful here. Clear rows without destructively aborting disk callbacks.
+  const namespace = (env as Env).MONEY;
+  await runInDurableObject(namespace.get(namespace.idFromName("private-operator")), (_instance, state) => {
+    state.storage.sql.exec("DELETE FROM meta_ad_operations").toArray();
+  });
 });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 it("discovers eligible Pages images and existing campaigns without exposing Page tokens", async () => {
   mock({ paged: true });
@@ -122,6 +124,8 @@ it("creates a paused ad only after verifying its Page image and paused parents",
     creative_id: creative, ad_id: ad, image_hash: hash, configuration_match: true,
     paid_delivery_authorized: false, launch_ready: false });
   expect(native.mutations).toEqual(["act_" + account + "/adcreatives", "act_" + account + "/ads"]);
+  // No in-memory operation map: replay must also survive a complete actor eviction.
+  await evictAllDurableObjects();
   const repeats = await api("POST", "/paused-ads", body);
   expect(await repeats.json()).toEqual(value);
   expect(native.mutations).toHaveLength(2);
