@@ -40,8 +40,9 @@ function sameSet(actual: unknown, expected: string[]): void {
     throw new MetaCampaignError("meta_ad_readback_mismatch", 409);
   }
 }
-function response(data: unknown, status = 200): Response {
-  return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
+function response(data: Obj, status = 200): Response {
+  return Response.json({ ...data, observed_at: new Date().toISOString(), graph_version: "v25.0" },
+    { status, headers: { "Cache-Control": "no-store" } });
 }
 
 /** Retain the selected edge/fields across pages; never follow an upstream token-bearing URL. */
@@ -101,6 +102,17 @@ async function assets(accountId: string, token: string): Promise<Obj> {
       { fields: "id,account_id,name,status,objective" })).map(v => {
         equal(v.account_id, accountId);
         return { id: id(v.id), name: v.name, status: v.status, objective: v.objective };
+      })],
+    ["ads", async () => (await rows("act_" + accountId + "/ads", token,
+      { fields: "id,account_id,campaign_id,adset_id,name,status,creative{id}" })).map(v => {
+        equal(v.account_id, accountId);
+        return { id: id(v.id), campaign_id: id(v.campaign_id), adset_id: id(v.adset_id),
+          name: v.name, status: v.status, creative_id: id(object(v.creative).id) };
+      })],
+    ["creatives", async () => (await rows("act_" + accountId + "/adcreatives", token,
+      { fields: "id,account_id,name,image_hash,link_url" })).map(v => {
+        equal(v.account_id, accountId);
+        return { id: id(v.id), name: v.name, image_hash: v.image_hash, link_url: v.link_url };
       })],
     ["permissions", async () => (await rows("me/permissions", token, {})).map(v =>
       ({ permission: v.permission, status: v.status }))],
@@ -196,7 +208,8 @@ function imageData(value: unknown): { base64: string; bytes: Uint8Array } {
 }
 
 /** POST calls are run inside the existing Durable Object's persistent idempotency guard. */
-export async function handleMetaAdRequest(request: Request, url: URL, token: string | undefined): Promise<Response> {
+export async function handleMetaAdRequest(request: Request, url: URL, token: string | undefined,
+  remember?: (known: Identity) => void): Promise<Response> {
   const route = /^\/v1\/meta\/accounts\/([1-9][0-9]{0,31})\/(creative-assets|images|paused-ads)(?:\/([1-9][0-9]{0,31}))?$/.exec(url.pathname);
   if (!route || (route[3] && route[2] !== "paused-ads")) return response({ error: "not_found" }, 404);
   if (!token) return response({ error: "meta_not_configured" }, 503);
@@ -226,7 +239,7 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
       if (nativeImages.length !== 1) throw new MetaCampaignError("meta_invalid_native_image", 502);
       const hash = object(nativeImages[0]).hash;
       if (typeof hash !== "string" || !hashPattern.test(hash)) throw new MetaCampaignError("meta_invalid_native_image", 502);
-      known.image_hash = hash;
+      known.image_hash = hash; remember?.(known);
       const native = await image(route[1], token, hash);
       return response({ status: "verified_image", ...known, source_sha256: sourceHash,
         byte_count: data.bytes.length, native, paid_delivery_authorized: false }, 201);
@@ -245,7 +258,7 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
         call_to_action: { type: "LEARN_MORE", value: { link: config.final_url } },
       } }),
     });
-    acknowledged = true; known.creative_id = id(created.id);
+    acknowledged = true; known.creative_id = id(created.id); remember?.(known);
     compareCreative(await readCreative(route[1], known.creative_id, token), config);
     // Recheck the parents immediately before constructing a new ad.
     checkParents(await readPausedMetaScope(config.campaign_id, token, route[1], config.adset_id), config);
@@ -253,7 +266,7 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
       name: config.name, adset_id: config.adset_id,
       creative: JSON.stringify({ creative_id: known.creative_id }), status: "PAUSED",
     });
-    known.ad_id = id(ad.id);
+    known.ad_id = id(ad.id); remember?.(known);
     const native = await observedAd(route[1], known.ad_id, token);
     equal(native.campaign_id, config.campaign_id); equal(native.adset_id, config.adset_id);
     equal(native.creative_id, known.creative_id); equal(native.ad.name, config.name);

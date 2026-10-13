@@ -34,7 +34,7 @@ CodeQL follows the governance package's documented private-repository fallback. 
 
 ## Meta paused image ads
 
-`GET /v1/meta/accounts/{account_id}/creative-assets` reads the account, eligible advertising Pages, native image hashes, campaigns and granted token permissions. Each collection reports `available` or `unavailable`; an inaccessible Page catalog is not an empty list. Page access tokens are never returned. This inventory is read-only.
+`GET /v1/meta/accounts/{account_id}/creative-assets` reads the account, eligible advertising Pages, native image hashes, campaigns, ads, creatives and granted token permissions. Each collection reports `available` or `unavailable`; an inaccessible Page catalog is not an empty list. Page access tokens are never returned. This inventory is read-only.
 
 `POST /v1/meta/accounts/{account_id}/images` accepts `{ "image_base64": "<PNG-or-JPEG-bytes-as-base64>" }`, up to 4 MiB decoded. It uploads the image to Meta, retains a SHA-256 of the submitted bytes and independently queries the account image by returned hash. Use an actual authorized product image, not a fabricated customer or chart.
 
@@ -59,7 +59,7 @@ CodeQL follows the governance package's documented private-repository fallback. 
 }
 ```
 
-Both POST routes require `Idempotency-Key`, a unique 1–128-character operation name. Repeating the **same path and exact request body** with the same account/key returns the stored result without resending external writes. Reusing the key with different input returns `409 meta_idempotency_conflict`. An interrupted operation returns `write_unverified`; inspect native inventory rather than retrying a create under a new key. The existing Durable Object stores request hashes and safe results, not credentials or the uploaded image bytes.
+Both POST routes require `Idempotency-Key`, a unique 1–128-character operation name. Repeating the **same path and exact request body** with the same account/key returns the stored result without resending external writes. Reusing the key with different input returns `409 meta_idempotency_conflict`. An interrupted operation returns `write_unverified`; inspect native inventory rather than retrying a create under a new key. The existing Durable Object stores request hashes, each acknowledged native identity before the next write, and safe results—not credentials or uploaded image bytes. Cached operation results retain their original observation timestamp; use the independent GET for current state.
 
 The ad path checks account ownership, PAUSED campaign/ad-set parents, non-special-category traffic configuration, exact requested country/interest sets and budget, eligible Page, and account-owned image. It creates a link creative, reads back its Page, image, text and destination, rechecks the parents, and creates the ad **PAUSED**. A final independent read verifies ad/creative/parent identities and copy. `GET /v1/meta/accounts/{account_id}/paused-ads/{ad_id}` returns current native paused state; it does not claim comparison with an unprovided historical request. Ambiguous writes retain every acknowledged image/creative/ad ID and never retry automatically. Safe upstream codes and trace IDs distinguish permission failures from missing data without returning secret-bearing messages.
 

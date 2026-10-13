@@ -151,17 +151,25 @@ export class MoneyLedger extends DurableObject<Env> {
       if (reserved.state === "complete" && reserved.result !== null && reserved.http_status !== null) {
         return { body: reserved.result, status: reserved.http_status };
       }
-      return { body: JSON.stringify({ error: "meta_operation_incomplete", status: "write_unverified",
+      return { body: reserved.result ?? JSON.stringify({ error: "meta_operation_incomplete", status: "write_unverified",
         operation_id: key, paid_delivery_authorized: false }), status: 409 };
     }
     let result: { body: string; status: number };
     try {
       const request = new Request("https://adslop.internal" + path, { method: "POST", body });
-      const reply = await handleMetaAdRequest(request, new URL(request.url), token);
+      const reply = await handleMetaAdRequest(request, new URL(request.url), token, known => {
+        // Persist acknowledgments before the next external operation, not only at final success.
+        const checkpoint = JSON.stringify({ error: "meta_operation_incomplete", status: "write_unverified",
+          operation_id: key, ...known, paid_delivery_authorized: false });
+        this.ctx.storage.sql.exec("UPDATE meta_ad_operations SET result=? WHERE request_key=?", checkpoint, key);
+      });
       result = { body: await reply.text(), status: reply.status };
     } catch {
       // A lost response or runtime failure is not permission to resend an external write.
-      result = { body: JSON.stringify({ error: "meta_operation_unverified", status: "write_unverified",
+      const checkpoint = this.ctx.storage.sql.exec<{ result: string | null }>(
+        "SELECT result FROM meta_ad_operations WHERE request_key=?", key
+      ).toArray()[0];
+      result = { body: checkpoint?.result ?? JSON.stringify({ error: "meta_operation_unverified", status: "write_unverified",
         operation_id: key, paid_delivery_authorized: false }), status: 502 };
     }
     this.ctx.storage.sql.exec(

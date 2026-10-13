@@ -18,7 +18,7 @@ async function api(method: string, path: string, data?: unknown, key = "operatio
 type Obj = Record<string, unknown>;
 function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreative?: boolean;
   activeParent?: boolean; wrongAccount?: boolean; adFailure?: boolean; readFailure?: boolean;
-  paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean; beforeCreative?: () => Promise<void> } = {}) {
+  paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean; beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
   let story: Obj = { page_id: page, link_data: { link: body.final_url, image_hash: hash,
@@ -46,6 +46,7 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
         return Response.json({ id: creative });
       }
       if (path.endsWith("/ads")) {
+        if (options.beforeAd) await options.beforeAd();
         expect(params.status).toBe("PAUSED");
         expect(params.adset_id).toBe(adset);
         if (options.adFailure) return Response.json({ error: "upstream" }, { status: 503 });
@@ -69,6 +70,10 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
       name: "Image fixture", width: 1200, height: 628, url: "https://example.org/image.png" }] });
     if (path.endsWith("/campaigns")) return Response.json({ data: [{ id: campaign, account_id: account,
       name: "Fixture campaign", status: "PAUSED", objective: "OUTCOME_TRAFFIC" }] });
+    if (path.endsWith("/ads")) return Response.json({ data: [{ id: ad, account_id: account,
+      campaign_id: campaign, adset_id: adset, name: body.name, status: "PAUSED", creative: { id: creative } }] });
+    if (path.endsWith("/adcreatives")) return Response.json({ data: [{ id: creative, account_id: account,
+      name: body.name, image_hash: hash, link_url: body.final_url }] });
     if (path === "me/permissions") return Response.json({ data: [
       { permission: "ads_read", status: "granted" }, { permission: "ads_management", status: "granted" },
     ] });
@@ -231,5 +236,21 @@ it("serializes duplicate requests while a native write is pending", async () => 
   expect((await first).status).toBe(201);
   expect(native.mutations).toHaveLength(2);
   expect((await api("POST", "/paused-ads", body)).status).toBe(201);
+  expect(native.mutations).toHaveLength(2);
+});
+
+it("retains the acknowledged creative identity during a pending ad write", async () => {
+  let release!: () => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const native = mock({ beforeAd: async () => { entered(); await wait; } });
+  const first = api("POST", "/paused-ads", body);
+  await started;
+  const pending = await api("POST", "/paused-ads", body);
+  expect(pending.status).toBe(409);
+  expect(await pending.json()).toMatchObject({ status: "write_unverified", error: "meta_operation_incomplete",
+    campaign_id: campaign, adset_id: adset, creative_id: creative, image_hash: hash });
+  release();
+  expect((await first).status).toBe(201);
   expect(native.mutations).toHaveLength(2);
 });
