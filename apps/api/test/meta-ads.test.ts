@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { reset } from "cloudflare:test";
+import { reset, evictAllDurableObjects } from "cloudflare:test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
 
@@ -97,7 +97,11 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
   return { calls, mutations, fake };
 }
 beforeEach(async () => { await reset(); });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(async () => {
+  // Gracefully drain output/storage gates before the next destructive reset.
+  await evictAllDurableObjects();
+  vi.unstubAllGlobals();
+});
 
 it("discovers eligible Pages images and existing campaigns without exposing Page tokens", async () => {
   mock({ paged: true });
@@ -253,4 +257,12 @@ it("retains the acknowledged creative identity during a pending ad write", async
   release();
   expect((await first).status).toBe(201);
   expect(native.mutations).toHaveLength(2);
+});
+
+it.each([401, 403, 429])("preserves native HTTP %i when an upstream body is not JSON", async status => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status })));
+  const result = await api("POST", "/paused-ads", body);
+  expect(result.status).toBe(status);
+  expect(await result.json()).toMatchObject({ error: status === 429 ? "meta_rate_limited" : "meta_access_denied",
+    paid_delivery_authorized: false });
 });
