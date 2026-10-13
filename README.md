@@ -181,7 +181,7 @@ The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) f
 
 ## Paddle subscription-cash integration
 
-Paddle was selected for Eightchord on 13 October 2026. This implementation is a receipt adapter, not checkout or paid-plan fulfillment. It makes no Paddle writes and does not authorize a charge. Live acceptance requires genuine merchant configuration and source-backed tests; the new payment tests have not yet been added.
+Paddle was selected for Eightchord on 13 October 2026. This implementation is a receipt adapter, not checkout or paid-plan fulfillment. It makes no Paddle writes and does not authorize a charge. Live acceptance requires genuine merchant configuration and source-backed tests; only configuration/denial tests are currently present; signature-success and monetary-admission regressions remain incomplete.
 
 The candidate `POST /v1/paddle/webhook` verifies Paddle's raw-body HMAC signature and timestamp, then reads the identified transaction or adjustment from Paddle's API. All other endpoints keep operator bearer authentication. `GET /v1/paddle/status` lists missing settings; `GET /v1/paddle/events/{event_id}` exposes delivery dispositions and monetary evidence without storing raw customer records.
 
