@@ -134,8 +134,9 @@ export async function verifyPaddleWebhook(request: Request, config: PaddleConnec
     verified = (await crypto.subtle.verify("HMAC", key, bytes, signed)) || verified;
   }
   if (!verified) throw new PaddleError("paddle_invalid_signature", 401);
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) > 5) throw new PaddleError("paddle_signature_expired", 401);
   let payload: Obj;
-  try { payload = object(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw))); }
+  try { payload = object(JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw))); }
   catch { throw new PaddleError("paddle_invalid_payload", 400); }
   const event_id = identifier(payload.event_id, "evt"), data = object(payload.data);
   if (typeof payload.event_type !== "string" || !/^[a-z][a-z_.]{1,80}$/.test(payload.event_type) ||
