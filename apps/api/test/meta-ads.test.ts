@@ -18,7 +18,7 @@ async function api(method: string, path: string, data?: unknown, key = "operatio
 type Obj = Record<string, unknown>;
 function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreative?: boolean;
   activeParent?: boolean; wrongAccount?: boolean; adFailure?: boolean; readFailure?: boolean;
-  paged?: boolean; deny?: boolean; beforeCreative?: () => Promise<void> } = {}) {
+  paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean; beforeCreative?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
   let story: Obj = { page_id: page, link_data: { link: body.final_url, image_hash: hash,
@@ -55,6 +55,10 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
     if (path === "act_" + account) return Response.json({ id: "act_" + account,
       account_id: account, name: "Fixture account", currency: "USD", timezone_name: "UTC" });
     if (path.endsWith("/promote_pages")) {
+      if (options.pagesDenied) return Response.json({ error: { code: 200, fbtrace_id: "page-trace" } }, { status: 403 });
+      if (options.unsafeNext) return Response.json({ data: [], paging: {
+        next: "https://unrelated.example.org/?access_token=never-follow", cursors: { after: "unsafe" },
+      } });
       if (options.paged && !params.after) return Response.json({ data: [], paging: {
         next: url.origin + url.pathname + "?after=second&access_token=never-use-this", cursors: { after: "second" },
       } });
@@ -194,4 +198,38 @@ it("keeps new Meta ad routes behind operator authorization", async () => {
   expect(missingKey.status).toBe(400);
   expect(await missingKey.json()).toMatchObject({ error: "meta_idempotency_key_required" });
   expect(native.fake).not.toHaveBeenCalled();
+});
+
+it("returns explicit partial discovery when Page entitlement is unavailable", async () => {
+  mock({ pagesDenied: true });
+  const result = await api("GET", "/creative-assets");
+  expect(result.status).toBe(200);
+  const value = await result.json();
+  expect(value).toMatchObject({ complete: false, pages: { status: "unavailable", error: "meta_access_denied",
+    upstream_code: 200, request_id: "page-trace" }, images: { status: "available" } });
+  expect(value.pages).not.toHaveProperty("rows");
+});
+it("rejects an off-origin paging destination without sending credentials there", async () => {
+  const native = mock({ unsafeNext: true });
+  const result = await api("GET", "/creative-assets");
+  expect(await result.json()).toMatchObject({ complete: false, pages: {
+    status: "unavailable", error: "meta_invalid_asset_page" } });
+  expect(native.calls.filter(v => v.path.endsWith("/promote_pages"))).toHaveLength(1);
+});
+it("serializes duplicate requests while a native write is pending", async () => {
+  let release!: () => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const native = mock({ beforeCreative: async () => { entered(); await wait; } });
+  const first = api("POST", "/paused-ads", body);
+  await started;
+  const concurrent = await api("POST", "/paused-ads", body);
+  expect(concurrent.status).toBe(409);
+  expect(await concurrent.json()).toMatchObject({ error: "meta_operation_incomplete", status: "write_unverified" });
+  expect(native.mutations).toHaveLength(1);
+  release();
+  expect((await first).status).toBe(201);
+  expect(native.mutations).toHaveLength(2);
+  expect((await api("POST", "/paused-ads", body)).status).toBe(201);
+  expect(native.mutations).toHaveLength(2);
 });

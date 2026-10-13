@@ -72,7 +72,11 @@ async function graph(method: "GET" | "POST", path: string, token: string,
     // Keep only numeric error codes and trace IDs, never upstream messages or tokens.
     let raw: unknown;
     try { raw = await reply.json(); }
-    catch { throw new MetaCampaignError("meta_invalid_native_response", 502); }
+    catch {
+      if (reply.status === 429) throw new MetaCampaignError("meta_rate_limited", 429);
+      if (reply.status === 401 || reply.status === 403) throw new MetaCampaignError("meta_access_denied", reply.status);
+      throw new MetaCampaignError("meta_invalid_native_response", 502);
+    }
     const failure = raw && typeof raw === "object" ? (raw as Obj).error : null;
     const detail = failure && typeof failure === "object" ? failure as Obj : {};
     const source = {
