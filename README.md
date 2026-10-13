@@ -177,3 +177,18 @@ Every delivery PR closes one open slice issue, stays within its declared file sc
 ## License
 
 The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
+
+
+## Paddle subscription-cash integration
+
+Paddle was selected for Eightchord on 13 October 2026. This implementation is a receipt adapter, not checkout or paid-plan fulfillment. It makes no Paddle writes and does not authorize a charge. Live acceptance requires genuine merchant configuration and source-backed tests; the new payment tests have not yet been added.
+
+The candidate `POST /v1/paddle/webhook` verifies Paddle's raw-body HMAC signature and timestamp, then reads the identified transaction or adjustment from Paddle's API. All other endpoints keep operator bearer authentication. `GET /v1/paddle/status` lists missing settings; `GET /v1/paddle/events/{event_id}` exposes delivery dispositions and monetary evidence without storing raw customer records.
+
+Required private settings are `PADDLE_ENVIRONMENT` (explicit `sandbox` or `live`), `PADDLE_ACCOUNT_ID` (stable merchant connection identity), `PADDLE_API_KEY`, `PADDLE_WEBHOOK_SECRET`, and `PADDLE_PRICE_MAP` (native recurring price IDs mapped to Adslop product IDs). Use a Paddle API key with transaction and adjustment read access. Keep a merchant's source identity fixed during key rotation; do not reuse it for another merchant. Subscribe a version-1 destination to `transaction.completed`, `adjustment.created` and `adjustment.updated`. A live destination must use platform events rather than simulations.
+
+The supported cash basis is fully captured subscription payment excluding pass-through tax, before Paddle fees. Gross and tax amounts remain separate evidence; payout totals are not substituted. The adapter requires a completed, single-product recurring transaction whose captured payments match its native totals, without balance credits or one-off items. Approved refunds and chargebacks reference the original capture; refund-first processing admits both atomically. Warnings, credits, chargeback reversals, tax-only refunds and unsupported baskets are explicit errors, not guessed allocation. Pending refunds and non-cash subscription events do not post receipts. Sandbox records never affect live economics.
+
+Immutable transaction/adjustment identities prevent repeated deliveries from posting twice. Conflicting source amounts and excessive aggregate refunds are rejected. Existing subscription and advertising arithmetic is unchanged. This does not establish complete historical coverage, invoice settlement, a working website checkout or platform account approval. Do not manually repost Paddle resources under other source names.
+
+Contracts: [Paddle signature verification](https://developer.paddle.com/webhooks/about/signature-verification/), [completed transactions](https://developer.paddle.com/webhooks/transactions/transaction-completed/) and [adjustment updates](https://developer.paddle.com/webhooks/adjustments/adjustment-updated/).

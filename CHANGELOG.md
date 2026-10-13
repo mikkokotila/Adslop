@@ -1,3 +1,8 @@
+# v0.11.0
+
+- Add a signed Paddle subscription-cash intake and native transaction confirmation path.
+- Preserve transaction and adjustment identities, exact tax evidence, refund limits and sandbox isolation.
+
 # v0.10.0
 
 - Discover eligible Meta Pages and account images without exposing Page tokens.

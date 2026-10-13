@@ -1,4 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
+import { paddleConnection, verifyPaddleWebhook, readPaddleEffects, PaddleError, paddleAmountBasis,
+  type PaddleConfig, type PaddleConnection, type PaddleEvent } from "./paddle";
+import { PaddleJournal } from "./paddle-ledger";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
@@ -25,7 +28,7 @@ export interface Observation {
   occurred_at: string;
 }
 
-export interface Env extends GoogleAdsConfig {
+export interface Env extends GoogleAdsConfig, PaddleConfig {
   MONEY: DurableObjectNamespace<MoneyLedger>;
   API_TOKEN: string;
   BUNNY_ACCESS_KEY: string;
@@ -83,6 +86,7 @@ type RecordResult = {
 export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    new PaddleJournal(this.ctx.storage.sql).create();
     new GoogleCostJournal(this.ctx.storage.sql).create();
     new MetaCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
@@ -131,6 +135,24 @@ export class MoneyLedger extends DurableObject<Env> {
         to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
       )
     `);
+  }
+
+  async admitPaddle(event: PaddleEvent, config: PaddleConnection): Promise<{ body: object; status: number }> {
+    const journal = new PaddleJournal(this.ctx.storage.sql);
+    try {
+      journal.assertEvent(config.source, event);
+      const effects = await readPaddleEffects(event, config);
+      const result = this.ctx.storage.transactionSync(() => journal.apply(config, event, effects));
+      return { body: result, status: 200 };
+    } catch (error) {
+      if (!(error instanceof PaddleError)) throw error;
+      journal.failure(config.source, event, error);
+      return { body: { error: error.code, request_id: error.requestId, event_id: event.event_id }, status: error.status };
+    }
+  }
+
+  async paddleHistory(source: string, eventId: string): Promise<object> {
+    return new PaddleJournal(this.ctx.storage.sql).history(source, eventId);
   }
 
   async metaAdWrite(path: string, key: string, body: string, token?: string): Promise<{ body: string; status: number }> {
@@ -557,12 +579,56 @@ function response(error: string, status: number): Response {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const incoming = new URL(request.url);
+    if (incoming.pathname === "/v1/paddle/webhook") {
+      if (request.method !== "POST") return response("method_not_allowed", 405);
+      if (incoming.search) return response("invalid_query", 400);
+      try {
+        const config = paddleConnection(env);
+        const event = await verifyPaddleWebhook(request, config);
+        const stub = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+        const result = await stub.admitPaddle(event, config);
+        return Response.json(result.body, { status: result.status, headers: { "Cache-Control": "no-store" } });
+      } catch (error) {
+        if (!(error instanceof PaddleError)) throw error;
+        return response(error.code, error.status);
+      }
+    }
     if (!env.API_TOKEN) return response("api_token_not_configured", 503);
     if (!await authorized(request.headers.get("Authorization"), env.API_TOKEN)) {
       return response("unauthorized", 401);
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    if (request.method === "GET" && url.pathname === "/v1/paddle/status") {
+      if (url.search) return response("invalid_query", 400);
+      const required = ["PADDLE_ENVIRONMENT", "PADDLE_ACCOUNT_ID", "PADDLE_API_KEY",
+        "PADDLE_WEBHOOK_SECRET", "PADDLE_PRICE_MAP"] as const;
+      const missing = required.filter(key => !env[key]);
+      if (missing.length) return Response.json({ configured: false, missing, live_validation: "not_verified" });
+      try {
+        const config = paddleConnection(env);
+        return Response.json({ configured: true, source: config.source, environment: config.environment,
+          mapped_prices: Object.keys(config.prices).length, amount_basis: paddleAmountBasis,
+          live_validation: "not_verified", checkout_enabled_by_this_adapter: false });
+      } catch (error) {
+        if (!(error instanceof PaddleError)) throw error;
+        return response(error.code, error.status);
+      }
+    }
+    const paddleEvent = /^\/v1\/paddle\/events\/(evt_[a-z0-9]{26})$/.exec(url.pathname);
+    if (request.method === "GET" && paddleEvent) {
+      if (url.search) return response("invalid_query", 400);
+      try {
+        const config = paddleConnection(env);
+        return Response.json(await ledger.paddleHistory(config.source, paddleEvent[1]), {
+          headers: { "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        if (!(error instanceof PaddleError)) throw error;
+        return response(error.code, error.status);
+      }
+    }
     if (/^\/v1\/google-ads\/accounts\/[0-9]{10}\/paused-search-campaigns(?:\/[1-9][0-9]*)?$/.test(url.pathname)) {
       return pausedSearchCampaigns(request, url, env);
     }
