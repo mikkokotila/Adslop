@@ -1,4 +1,7 @@
 /** Read-only, source-dated economic subtotals. No inferred completeness or timezone proration. */
+import { StripeJournal } from "./stripe-ledger";
+import type { StripeCashEffect } from "./stripe-cash";
+
 export interface EconomicPeriod {
   product_id: string; currency: string; from: string; to: string; time_zone: string;
 }
@@ -15,7 +18,14 @@ export interface PeriodCost {
   platform: string; account_id: string; campaign_id: string; local_date: string;
   revision: number; time_zone: string; amount: string; observed_at: string;
 }
-export interface PeriodSources { observations: PeriodObservation[]; costs: PeriodCost[] }
+export interface PeriodStripeRow {
+  [key: string]: string;
+  account_id: string; body: string; occurred_at: string; observed_at: string;
+}
+export interface PeriodSources {
+  observations: PeriodObservation[]; costs: PeriodCost[];
+  stripe?: PeriodStripeRow[]; stripe_breaks?: Record<string, unknown>[];
+}
 const DAY = 86400000;
 const MAX_ROWS = 10000;
 function date(value: string | null): value is string {
@@ -83,6 +93,26 @@ export function summarizeEconomicPeriod(period: EconomicPeriod, sources: PeriodS
       manual.push(evidence);
     } else throw new EconomicPeriodError("economic_invalid_stored_kind", 500);
   }
+  for (const row of sources.stripe ?? []) {
+    const day = localDate(row.occurred_at, formatter);
+    if (!between(day, period)) continue;
+    const effect = JSON.parse(row.body) as StripeCashEffect;
+    if (!/^[1-9][0-9]*$/.test(effect.amount_minor) ||
+        !["subscription_receipt", "subscription_refund"].includes(effect.kind) ||
+        effect.occurred_at !== row.occurred_at || effect.currency !== period.currency ||
+        effect.product_id !== period.product_id || effect.cash_basis !== "customer_cash_including_tax_before_fees") {
+      throw new EconomicPeriodError("economic_invalid_stored_stripe_cash", 500);
+    }
+    const amount = BigInt(effect.amount_minor);
+    if (effect.kind === "subscription_receipt") receipts += amount;
+    else refunds += amount;
+    cash.push({ source: "stripe", account_id: row.account_id, event_id: effect.resource_id,
+      kind: effect.kind, amount_minor: effect.amount_minor, occurred_at: row.occurred_at,
+      local_date: day, channel: null, cash_basis: effect.cash_basis, time_basis: effect.time_basis,
+      invoice_id: effect.invoice_id, charge_id: effect.charge_id, invoice_tax_minor: effect.invoice_tax_minor,
+      refund_tax_minor: effect.refund_tax_minor, observed_at: row.observed_at });
+  }
+  const stripeBreaks = sources.stripe_breaks ?? [];
   // Latest selection belongs to the read snapshot; a source/day must appear once, not per revision.
   const selected = new Map<string, PeriodCost>();
   for (const row of sources.costs) {
@@ -116,13 +146,14 @@ export function summarizeEconomicPeriod(period: EconomicPeriod, sources: PeriodS
   const mismatched = [...groups.values()].filter(g => !g.comparable);
   const hasMoneyOut = manual.length + selected.size > 0;
   const out = (manualSpend - credits) * factor + nativeSameZone;
-  const difference = cash.length && hasMoneyOut && !mismatched.length ?
+  const difference = cash.length && hasMoneyOut && !mismatched.length && !stripeBreaks.length ?
     ((receipts - refunds) * factor - out).toString() : null;
   return {
     product_id: period.product_id, currency: period.currency,
     period: { from: period.from, to: period.to, inclusive: true, time_zone: period.time_zone },
     evidence_boundary: "current_durable_read_snapshot", generated_at: new Date().toISOString(),
-    money_in: { status: cash.length ? "observed_incomplete" : "no_observations",
+    money_in: { status: stripeBreaks.length ? "reconciliation_required" : cash.length ? "observed_incomplete" : "no_observations",
+      ...(stripeBreaks.length ? { stripe_reconciliation_breaks: stripeBreaks } : {}),
       observed_receipts_minor: receipts.toString(), observed_refunds_minor: refunds.toString(),
       observed_net_receipts_minor: (receipts - refunds).toString(), observations: cash },
     money_out: { status: mismatched.length ? "incomparable_time_zones" : hasMoneyOut ? "observed_incomplete" : "no_observations",
@@ -136,6 +167,7 @@ export function summarizeEconomicPeriod(period: EconomicPeriod, sources: PeriodS
     observed_difference_micros: difference,
     coverage: { complete: false, verified_zero: false,
       reasons: ["cash_source_completeness_not_verified", "advertising_source_completeness_not_verified",
+        ...(stripeBreaks.length ? ["stripe_cash_reconciliation_required"] : []),
         ...(!cash.length ? ["no_cash_observations_in_period"] : []),
         ...(!hasMoneyOut ? ["no_advertising_observations_in_period"] : []),
         ...(mismatched.length ? ["native_daily_buckets_have_different_time_zone"] : [])] },
@@ -176,5 +208,14 @@ export function readEconomicPeriod(sql: SqlStorage, period: EconomicPeriod): obj
   if ([observations, google, meta].some(rows => rows.length > MAX_ROWS)) {
     throw new EconomicPeriodError("economic_period_row_limit", 413);
   }
-  return summarizeEconomicPeriod(period, { observations, costs: [...google, ...meta] });
+  const stripe: PeriodStripeRow[] = [];
+  for (const row of sql.exec<PeriodStripeRow>(
+    "SELECT account_id,body,occurred_at,observed_at FROM stripe_effects WHERE mode='live' " +
+    "AND product_id=? AND currency=? AND occurred_at>=? AND occurred_at<? ORDER BY occurred_at,resource_id",
+    period.product_id, period.currency, low, high)) {
+    if (between(localDate(row.occurred_at, formatter), period)) stripe.push(row);
+    if (stripe.length > MAX_ROWS) throw new EconomicPeriodError("economic_period_row_limit", 413);
+  }
+  return summarizeEconomicPeriod(period, { observations, costs: [...google, ...meta], stripe,
+    stripe_breaks: new StripeJournal(sql).reconciliationBreaks(period.product_id, period.currency) });
 }
