@@ -1,3 +1,8 @@
+# v0.11.0
+
+- Report dated subscription cash and native advertising evidence with exact micro-unit arithmetic.
+- Distinguish missing evidence from verified zero and withhold comparisons across incompatible source timezones.
+
 # v0.10.0
 
 - Discover eligible Meta Pages and account images without exposing Page tokens.
