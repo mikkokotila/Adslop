@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { StripeError, StripeReader, STRIPE_VERSION, stripeConnection, verifyStripeWebhook,
   boundedBytes, productId, type StripeSettings, type StripeMode, type StripeConnection } from "./stripe";
-import { StripeJournal, importStripeCash, type StripeImport, type StripeReply } from "./stripe-ledger";
+import { StripeJournal, importStripeCash, type StripeImport } from "./stripe-ledger";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
@@ -137,17 +137,18 @@ export class MoneyLedger extends DurableObject<Env> {
     `);
   }
 
-  async stripeImport(config: StripeConnection, input: StripeImport): Promise<StripeReply> {
-    return importStripeCash(config, input, this.ctx.storage.sql,
+  async stripeImport(config: StripeConnection, input: StripeImport): Promise<{ status: number; body: string }> {
+    const result = await importStripeCash(config, input, this.ctx.storage.sql,
       operation => this.ctx.storage.transactionSync(operation));
+    return { status: result.status, body: JSON.stringify(result.body) };
   }
 
-  async stripeEvidence(mode: StripeMode, type: "events" | "effects", id: string): Promise<StripeReply> {
+  async stripeEvidence(mode: StripeMode, type: "events" | "effects", id: string): Promise<{ status: number; body: string }> {
     try {
       const journal = new StripeJournal(this.ctx.storage.sql);
-      return { status: 200, body: type === "events" ? journal.events(mode, id) : journal.effects(mode, id) };
+      return { status: 200, body: JSON.stringify(type === "events" ? journal.events(mode, id) : journal.effects(mode, id)) };
     } catch (error) {
-      if (error instanceof StripeError) return { status: error.status, body: { error: error.code } };
+      if (error instanceof StripeError) return { status: error.status, body: JSON.stringify({ error: error.code }) };
       throw error;
     }
   }
@@ -606,7 +607,7 @@ export default {
             throw new StripeError("stripe_invalid_query", 400);
           }
           const result = await ledger.stripeEvidence(mode, operation, id);
-          return reply(result.body, result.status);
+          return reply(JSON.parse(result.body), result.status);
         }
         const config = stripeConnection(env, mode);
         if (operation === "status") {
@@ -637,7 +638,7 @@ export default {
           input = Object.fromEntries(values);
         }
         const result = await ledger.stripeImport(config, input);
-        return reply(result.body, result.status);
+        return reply(JSON.parse(result.body), result.status);
       } catch (error) {
         if (error instanceof StripeError) return reply({ error: error.code, request_id: error.request_id }, error.status);
         throw error;

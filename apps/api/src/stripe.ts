@@ -148,7 +148,7 @@ export async function verifyStripeWebhook(request: Request, config: StripeConnec
   }
   if (!valid) throw new StripeError("stripe_invalid_signature", 400);
   let parsed: unknown;
-  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)); }
+  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body)); }
   catch { throw new StripeError("stripe_invalid_json", 400); }
   return { event: stripeEvent(parsed, config.mode), payload_hash: await stripeDigest(body) };
 }
@@ -180,7 +180,7 @@ export class StripeReader {
     }
     try {
       const raw = await boundedBytes(reply, 2_000_000);
-      const result = stripeObject(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)));
+      const result = stripeObject(JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(raw)));
       if (result.error) throw new Error("error_response");
       return result;
     } catch { throw new StripeError("stripe_invalid_source", 502, true, id); }
