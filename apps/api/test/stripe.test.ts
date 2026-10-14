@@ -507,3 +507,26 @@ it("bounds custom Product IDs without relaxing other Stripe resource identities"
   expect(() => stripeConnection({ STRIPE_SANDBOX_CONNECTION: JSON.stringify(value) }, "sandbox"))
     .toThrow("stripe_invalid_configuration");
 });
+
+it.each(["account", "events"])("preserves known pending-refund identity when native %s reads fail", async (stage) => {
+  const f = fixture("live");
+  const refund = f.refund("re_KnownPending", 255, "pending");
+  const initial = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(await initial.json()).toMatchObject({ created: 1, pending_refunds: ["re_KnownPending"] });
+  refund.status = "succeeded";
+  f.charge.amount_refunded = 255;
+  if (stage === "events") f.transport.mockImplementationOnce(async () => Response.json(f.nativeAccount));
+  f.transport.mockImplementationOnce(async () => Response.json({ error: "unavailable" }, { status: 503 }));
+  const changed = await signed(f.event("evt_ResolvedRefund" + stage, "refund.updated", "re_KnownPending"), f.config, f.runtime);
+  expect(changed.status).toBe(503);
+  expect(await changed.json()).toMatchObject({ status: "retryable", invoice_id: f.invoice.id });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: null,
+    difference_minor: null, difference_micros: null, cash_status: "reconciliation_required" });
+  expect(await (await periodReport(f.runtime)).json()).toMatchObject({
+    money_in: { status: "reconciliation_required" }, observed_difference_micros: null });
+  const recovered = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(await recovered.json()).toMatchObject({ created: 1, duplicate: 1 });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 1000 });
+  const replay = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(await replay.json()).toMatchObject({ created: 0, duplicate: 2 });
+});
