@@ -137,16 +137,21 @@ export class MoneyLedger extends DurableObject<Env> {
     `);
   }
 
+  private stripeImportRunning = false;
   async stripeImport(config: StripeConnection, input: StripeImport): Promise<{ status: number; body: string }> {
-    const result = await importStripeCash(config, input, this.ctx.storage.sql,
-      operation => this.ctx.storage.transactionSync(operation));
-    return { status: result.status, body: JSON.stringify(result.body) };
+    if (this.stripeImportRunning) return { status: 503, body: JSON.stringify({ error: "stripe_import_busy" }) };
+    this.stripeImportRunning = true;
+    try {
+      const result = await importStripeCash(config, input, this.ctx.storage.sql,
+        operation => this.ctx.storage.transactionSync(operation));
+      return { status: result.status, body: JSON.stringify(result.body) };
+    } finally { this.stripeImportRunning = false; }
   }
 
-  async stripeEvidence(mode: StripeMode, type: "events" | "effects", id: string): Promise<{ status: number; body: string }> {
+  async stripeEvidence(mode: StripeMode, type: "events" | "effects", id: string, after = 0, limit = 100): Promise<{ status: number; body: string }> {
     try {
       const journal = new StripeJournal(this.ctx.storage.sql);
-      return { status: 200, body: JSON.stringify(type === "events" ? journal.events(mode, id) : journal.effects(mode, id)) };
+      return { status: 200, body: JSON.stringify(type === "events" ? journal.events(mode, id) : journal.effects(mode, id, after, limit)) };
     } catch (error) {
       if (error instanceof StripeError) return { status: error.status, body: JSON.stringify({ error: error.code }) };
       throw error;
@@ -512,6 +517,7 @@ export class MoneyLedger extends DurableObject<Env> {
       }
     }
     const stripe = new StripeJournal(this.ctx.storage.sql).totals(product, currency);
+    const stripeBreaks = new StripeJournal(this.ctx.storage.sql).reconciliationBreaks(product, currency);
     const subscriptionRevenue = receipts - refunds + stripe.receipts - stripe.refunds;
     const fractionDigits = new Intl.NumberFormat("en", {
       style: "currency", currency,
@@ -540,11 +546,11 @@ export class MoneyLedger extends DurableObject<Env> {
       value % microsPerMinor === 0n ? exact(value / microsPerMinor) : null;
     return {
       product_id: product, currency,
-      subscription_revenue_minor: exact(subscriptionRevenue),
+      subscription_revenue_minor: stripeBreaks.length ? null : exact(subscriptionRevenue),
       advertising_spend_minor: exactMinor(advertisingMicros),
-      difference_minor: exactMinor(differenceMicros),
+      difference_minor: stripeBreaks.length ? null : exactMinor(differenceMicros),
       advertising_spend_micros: advertisingMicros.toString(),
-      difference_micros: differenceMicros.toString(),
+      difference_micros: stripeBreaks.length ? null : differenceMicros.toString(),
       advertising_spend_by_channel_minor: {
         google: exactMinor(byChannel.google * microsPerMinor + importedMicros),
         meta: exact(byChannel.meta + importedMetaMinor),
@@ -554,7 +560,9 @@ export class MoneyLedger extends DurableObject<Env> {
         ...(stripe.count ? ["stripe_verified_cash"] : []),
         ...(googleRows.length ? ["google_ads_daily_revisions"] : []),
         ...(metaRows.length ? ["meta_ads_daily_revisions"] : []),
-      ].join("_and_") + (googleRows.length || metaRows.length ? "" : "_only"),
+      ].join("_and_") + (googleRows.length || metaRows.length || stripe.count ? "" : "_only"),
+      ...(stripeBreaks.length ? { cash_status: "reconciliation_required", stripe_reconciliation_breaks: stripeBreaks,
+        observed_subscription_subtotal_minor: subscriptionRevenue.toString() } : {}),
       ...(stripe.count ? { stripe_cash_basis: "customer_cash_including_tax_before_fees" } : {}),
       attribution: "none",
       coverage: "not_verified",
@@ -581,7 +589,7 @@ function response(error: string, status: number): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const stripeUrl = new URL(request.url);
-    const stripeRoute = /^\/v1\/stripe\/(live|sandbox)\/(webhook|status|import|events|effects)(?:\/(evt_[A-Za-z0-9]{1,96}))?$/.exec(stripeUrl.pathname);
+    const stripeRoute = /^\/v1\/stripe\/(live|sandbox)\/(webhook|status|import|events|effects)(?:\/((?:evt|in)_[A-Za-z0-9]{1,96}))?$/.exec(stripeUrl.pathname);
     if (stripeRoute) {
       const mode = stripeRoute[1] as StripeMode;
       const operation = stripeRoute[2];
@@ -602,11 +610,15 @@ export default {
         const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
         if (operation === "effects" || operation === "events") {
           const id = operation === "events" ? stripeRoute[3] : stripeUrl.searchParams.get("product_id");
+          const query = stripeUrl.searchParams;
+          const after = query.get("after") ?? "0", limit = query.get("limit") ?? "100";
           if (!productId(id) || (operation === "effects" &&
-              (stripeUrl.searchParams.size !== 1 || !stripeUrl.searchParams.has("product_id")))) {
+              (!query.has("product_id") || [...query.keys()].some(k => !["product_id", "after", "limit"].includes(k)) ||
+               new Set(query.keys()).size !== query.size || !/^(0|[1-9][0-9]{0,15})$/.test(after) ||
+               !Number.isSafeInteger(Number(after)) || !/^[1-9][0-9]{0,3}$/.test(limit) || Number(limit) > 1000))) {
             throw new StripeError("stripe_invalid_query", 400);
           }
-          const result = await ledger.stripeEvidence(mode, operation, id);
+          const result = await ledger.stripeEvidence(mode, operation, id, Number(after), Number(limit));
           return reply(JSON.parse(result.body), result.status);
         }
         const config = stripeConnection(env, mode);

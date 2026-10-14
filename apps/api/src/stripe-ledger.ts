@@ -1,7 +1,7 @@
 /** Immutable Stripe cash effects and append-only delivery dispositions. No customer records. */
 import { StripeError, StripeReader, STRIPE_VERSION, type StripeConnection, type StripeEvent,
   type StripeMode } from "./stripe";
-import { collectStripeEvent, collectStripeInvoice, type StripeCashBatch, type StripeCashEffect } from "./stripe-cash";
+import { collectStripeEvent, collectStripeInvoice, type StripeCashBatch, type StripeCashEffect, type StripeResolution } from "./stripe-cash";
 
 export interface StripeImport {
   event_id?: string;
@@ -69,13 +69,45 @@ export class StripeJournal {
       attempts: rows.map(row => ({ ...JSON.parse(row.body), observed_at: row.observed_at, account_id: row.account_id })),
       returned_limit: 100 };
   }
-  effects(mode: StripeMode, product: string): Record<string, unknown> {
-    const rows = this.sql.exec<{ body: string; account_id: string; observed_at: string }>(
-      "SELECT body, account_id, observed_at FROM stripe_effects WHERE mode=? AND product_id=? ORDER BY occurred_at, resource_id LIMIT 1001",
-      mode, product).toArray();
-    if (rows.length > 1000) throw new StripeError("stripe_effect_query_limit", 413);
+  effects(mode: StripeMode, product: string, after = 0, limit = 100): Record<string, unknown> {
+    const rows = this.sql.exec<{ cursor: number; body: string; account_id: string; observed_at: string }>(
+      "SELECT rowid AS cursor,body,account_id,observed_at FROM stripe_effects " +
+      "WHERE mode=? AND product_id=? AND rowid>? ORDER BY rowid LIMIT ?",
+      mode, product, after, limit + 1).toArray();
+    const page = rows.slice(0, limit);
     return { mode, product_id: product, coverage: "not_verified", cash_basis: "customer_cash_including_tax_before_fees",
-      effects: rows.map(row => ({ ...JSON.parse(row.body), account_id: row.account_id, observed_at: row.observed_at })) };
+      effects: page.map(row => ({ ...JSON.parse(row.body), account_id: row.account_id, observed_at: row.observed_at })),
+      has_more: rows.length > limit, next_cursor: rows.length > limit ? page.at(-1)!.cursor.toString() : null };
+  }
+  /** Known invoice/charge links make a failed refresh actionable without erasing prior cash. */
+  invoiceFor(config: StripeConnection, identity: string, resource: string | null): string | null {
+    if (resource) {
+      const effect = this.sql.exec<{ invoice_id: string }>(
+        "SELECT invoice_id FROM stripe_effects WHERE mode=? AND account_id=? AND resource_id=?",
+        config.mode, config.account_id, resource).toArray()[0];
+      if (effect) return effect.invoice_id;
+    }
+    const previous = this.sql.exec<{ invoice_id: string }>(
+      "SELECT json_extract(body,'$.invoice_id') AS invoice_id FROM stripe_deliveries " +
+      "WHERE mode=? AND account_id=? AND event_id=? AND json_extract(body,'$.invoice_id') IS NOT NULL " +
+      "ORDER BY id DESC LIMIT 1", config.mode, config.account_id, identity).toArray()[0];
+    return previous?.invoice_id ?? null;
+  }
+  reconciliationBreaks(product: string, currency: string): Record<string, unknown>[] {
+    // One serialized complete source refresh supersedes previous delivery dispositions for its invoice.
+    const rows = this.sql.exec<{ account_id: string; observed_at: string; body: string }>(
+      "SELECT d.account_id,d.observed_at,d.body FROM stripe_deliveries d WHERE d.mode='live' " +
+      "AND json_extract(d.body,'$.status') IN ('retryable','quarantined') " +
+      "AND d.id=(SELECT MAX(x.id) FROM stripe_deliveries x WHERE x.mode=d.mode AND x.account_id=d.account_id " +
+      "AND json_extract(x.body,'$.invoice_id')=json_extract(d.body,'$.invoice_id')) " +
+      "AND EXISTS(SELECT 1 FROM stripe_effects e WHERE e.mode=d.mode AND e.account_id=d.account_id " +
+      "AND e.invoice_id=json_extract(d.body,'$.invoice_id') AND e.product_id=? AND e.currency=?) " +
+      "ORDER BY d.id", product, currency).toArray();
+    return rows.map(row => {
+      const body = JSON.parse(row.body) as Record<string, unknown>;
+      return { account_id: row.account_id, invoice_id: body.invoice_id, error: body.error,
+        status: body.status, observed_at: row.observed_at };
+    });
   }
   totals(product: string, currency: string): { receipts: bigint; refunds: bigint; count: number } {
     const rows = this.sql.exec<{ kind: string; amount_minor: string }>(
@@ -96,14 +128,18 @@ export async function importStripeCash(config: StripeConnection, input: StripeIm
   const journal = new StripeJournal(sql);
   const client = new StripeReader(config);
   const identity = input.event_id ?? input.invoice_id ?? "";
+  const resolution: StripeResolution = {
+    invoice_id: input.invoice_id ?? journal.invoiceFor(config, identity, input.event?.object_id ?? null),
+    charge_id: null,
+  };
   const common = { mode: config.mode, account_id: config.account_id, event_id: input.event_id ?? null,
     source: input.event ? "stripe_signed_webhook" : "stripe_operator_reconciliation",
     payload_hash: input.payload_hash ?? null, api_version: STRIPE_VERSION, coverage: "not_verified" };
   try {
     await client.account();
     const batch = input.event_id
-      ? (await collectStripeEvent(client, input.event_id, input.event)).batch
-      : await collectStripeInvoice(client, input.invoice_id!);
+      ? (await collectStripeEvent(client, input.event_id, input.event, resolution)).batch
+      : await collectStripeInvoice(client, input.invoice_id!, resolution);
     return transaction(() => {
       const counts = journal.apply(config, batch);
       const result = { ...common, ...counts, invoice_id: batch.invoice_id,
@@ -118,7 +154,7 @@ export async function importStripeCash(config: StripeConnection, input: StripeIm
     if (!(error instanceof StripeError)) throw error;
     const result = { ...common, status: error.retryable ? "retryable" : "quarantined",
       error: error.code, request_ids: client.request_ids,
-      invoice_id: input.invoice_id ?? null };
+      invoice_id: resolution.invoice_id ?? journal.invoiceFor(config, identity, resolution.charge_id) };
     transaction(() => journal.delivery(config, identity, result));
     return { status: error.retryable ? 503 : input.event ? 200 : 422, body: result };
   }

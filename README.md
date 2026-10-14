@@ -178,7 +178,6 @@ Every delivery PR closes one open slice issue, stays within its declared file sc
 
 The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
 
-
 ## Stripe cash integration candidate
 
 The Stripe adapter is independent of Eightchord checkout and subscription access. It exposes signature-authenticated `POST /v1/stripe/{live|sandbox}/webhook` and bearer-protected `GET /v1/stripe/{mode}/status`, `POST /v1/stripe/{mode}/import`, `GET /v1/stripe/{mode}/events/{event_id}`, and `GET /v1/stripe/{mode}/effects?product_id=eightchord`.

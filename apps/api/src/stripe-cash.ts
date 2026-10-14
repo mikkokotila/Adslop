@@ -26,6 +26,7 @@ export interface StripeCashBatch {
   reason: string | null;
   pending_refunds: string[];
 }
+export interface StripeResolution { invoice_id: string | null; charge_id: string | null }
 function scope(value: StripeObject, client: StripeReader, kind: string): void {
   if (value.object !== kind || value.livemode !== (client.config.mode === "live")) {
     throw new StripeError("stripe_resource_scope_mismatch", 502, true);
@@ -41,6 +42,7 @@ async function invoiceForIntent(client: StripeReader, intentId: string): Promise
   const payments = await client.list("/invoice_payments", {
     "payment[type]": "payment_intent", "payment[payment_intent]": intentId, status: "paid",
   });
+  if (!payments.length) throw new StripeError("stripe_invoice_payment_pending", 503, true);
   if (payments.length !== 1) throw new StripeError("stripe_ambiguous_invoice_allocation");
   scope(payments[0], client, "invoice_payment");
   const payment = stripeObject(payments[0].payment);
@@ -50,9 +52,12 @@ async function invoiceForIntent(client: StripeReader, intentId: string): Promise
   return stripeId(payments[0].invoice, "in");
 }
 /** Re-read the complete invoice, paid allocation and all refunds on the charge. */
-export async function collectStripeInvoice(client: StripeReader, invoiceId: string): Promise<StripeCashBatch> {
+export async function collectStripeInvoice(client: StripeReader, invoiceId: string,
+  resolution: StripeResolution = { invoice_id: null, charge_id: null }): Promise<StripeCashBatch> {
   stripeId(invoiceId, "in");
-  const invoice = await client.resource("/invoices", invoiceId, "invoice");
+  const invoice = await client.resource("/invoices", invoiceId, "invoice", { "expand[]": "amount_paid_off_stripe" });
+  resolution.invoice_id = invoiceId;
+  if (invoice.parent === null) throw new StripeError("stripe_not_subscription_invoice");
   const parent = stripeObject(invoice.parent);
   if (parent.type !== "subscription_details") throw new StripeError("stripe_not_subscription_invoice");
   const subscription = stripeId(stripeObject(parent.subscription_details).subscription, "sub");
@@ -94,6 +99,10 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
   const product = [...products][0];
   service.sort((a, b) => a.line_id.localeCompare(b.line_id));
   if (invoice.status !== "paid") {
+    if (stripeMoney(invoice.amount_paid) > 0n) throw new StripeError("stripe_non_cash_or_partial_invoice");
+    if (!["draft", "open", "void", "uncollectible"].includes(String(invoice.status))) {
+      throw new StripeError("stripe_unknown_invoice_status", 502, true);
+    }
     return { effects: [], invoice_id: invoiceId, reason: "invoice_not_paid", pending_refunds: [] };
   }
   const total = stripeMoney(invoice.total);
@@ -102,7 +111,7 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
   }
   // A paid flag can represent credit or an out-of-band payment. Require full native cash equality.
   if (total <= 0n || stripeMoney(invoice.amount_paid) !== total || stripeMoney(invoice.amount_due) !== total ||
-      stripeMoney(invoice.amount_remaining) !== 0n || invoice.starting_balance !== 0 ||
+      stripeMoney(invoice.amount_remaining) !== 0n || stripeMoney(invoice.amount_overpaid) !== 0n || invoice.starting_balance !== 0 ||
       invoice.ending_balance !== 0 || stripeMoney(invoice.amount_paid_off_stripe) !== 0n ||
       stripeMoney(invoice.pre_payment_credit_notes_amount) !== 0n) {
     throw new StripeError("stripe_non_cash_or_partial_invoice");
@@ -112,6 +121,7 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
   const tax = (taxes ?? []).reduce((sum: bigint, raw: unknown) => sum + stripeMoney(stripeObject(raw).amount), 0n);
   if (tax > total) throw new StripeError("stripe_tax_exceeds_payment");
   const payments = await client.list("/invoice_payments", { invoice: invoiceId, status: "paid" });
+  if (!payments.length) throw new StripeError("stripe_invoice_payment_pending", 503, true);
   if (payments.length !== 1) throw new StripeError("stripe_ambiguous_invoice_allocation");
   const paid = payments[0];
   scope(paid, client, "invoice_payment");
@@ -127,6 +137,7 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
   }
   const chargeId = stripeId(intent.latest_charge, "ch");
   const charge = await client.resource("/charges", chargeId, "charge");
+  resolution.charge_id = chargeId;
   if (charge.payment_intent !== intentId || charge.status !== "succeeded" || charge.paid !== true ||
       charge.captured !== true || stripeMoney(charge.amount_captured) !== total || currency(charge.currency) !== unit ||
       charge.transfer_data != null || charge.on_behalf_of != null) {
@@ -157,13 +168,14 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
     effects.push({ ...common, resource_id: id, kind: "subscription_refund", amount_minor: amount.toString(),
       occurred_at: stripeTime(refund.created), time_basis: "successful_refund_created_at" });
   }
-  if (refunded > total || refunded > stripeMoney(charge.amount_refunded)) {
+  if (refunded > total || refunded !== stripeMoney(charge.amount_refunded)) {
     throw new StripeError("stripe_refund_total_mismatch", 503, true);
   }
   return { effects, invoice_id: invoiceId, reason: null, pending_refunds: pending.sort() };
 }
 export async function collectStripeEvent(client: StripeReader, eventId: string,
-  expected?: StripeEvent): Promise<{ event: StripeEvent; batch: StripeCashBatch }> {
+  expected?: StripeEvent, resolution: StripeResolution = { invoice_id: null, charge_id: null }):
+  Promise<{ event: StripeEvent; batch: StripeCashBatch }> {
   const event = stripeEvent(await client.get("/events/" + stripeId(eventId, "evt")), client.config.mode);
   if (event.id !== eventId || (expected && JSON.stringify(expected) !== JSON.stringify(event))) {
     throw new StripeError("stripe_event_identity_mismatch", 400);
@@ -171,22 +183,31 @@ export async function collectStripeEvent(client: StripeReader, eventId: string,
   let invoiceId: string;
   if (["invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed"].includes(event.type)) {
     invoiceId = stripeId(event.object_id, "in");
+    resolution.invoice_id = invoiceId;
   } else if (["refund.created", "refund.updated", "refund.failed", "charge.refunded"].includes(event.type)) {
     let intentId: string;
     if (event.type === "charge.refunded") {
       const charge = await client.resource("/charges", stripeId(event.object_id, "ch"), "charge");
+      resolution.charge_id = stripeId(charge.id, "ch");
       intentId = stripeId(charge.payment_intent, "pi");
     } else {
       const refund = await client.get("/refunds/" + stripeId(event.object_id, "re"));
       if (refund.id !== event.object_id || refund.object !== "refund") {
         throw new StripeError("stripe_refund_identity_mismatch", 502, true);
       }
+      resolution.charge_id = stripeId(refund.charge, "ch");
       intentId = stripeId(refund.payment_intent, "pi");
     }
     invoiceId = await invoiceForIntent(client, intentId);
+  } else if (event.type.startsWith("charge.dispute.")) {
+    const dispute = await client.resource("/disputes", stripeId(event.object_id, "du"), "dispute");
+    resolution.charge_id = stripeId(dispute.charge, "ch");
+    const charge = await client.resource("/charges", resolution.charge_id, "charge");
+    resolution.invoice_id = await invoiceForIntent(client, stripeId(charge.payment_intent, "pi"));
+    throw new StripeError("stripe_dispute_requires_reconciliation");
   } else {
-    if (event.type.startsWith("charge.dispute.")) throw new StripeError("stripe_dispute_requires_reconciliation");
     return { event, batch: { effects: [], invoice_id: null, reason: "event_not_cash_evidence", pending_refunds: [] } };
   }
-  return { event, batch: await collectStripeInvoice(client, invoiceId) };
+  resolution.invoice_id = invoiceId;
+  return { event, batch: await collectStripeInvoice(client, invoiceId, resolution) };
 }

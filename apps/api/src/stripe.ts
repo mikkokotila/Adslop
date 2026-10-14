@@ -159,7 +159,7 @@ export class StripeReader {
   private readonly started = Date.now();
   constructor(readonly config: StripeConnection) {}
   async get(path: string, params: Record<string, string> = {}): Promise<StripeObject> {
-    if (!/^\/(account|events|invoices|invoice_payments|payment_intents|charges|refunds|prices)(?:\/[A-Za-z0-9_]+)*(?:\/lines)?$/.test(path)) {
+    if (!/^\/(account|events|invoices|invoice_payments|payment_intents|charges|refunds|prices|disputes)(?:\/[A-Za-z0-9_]+)*(?:\/lines)?$/.test(path)) {
       throw new StripeError("stripe_invalid_api_path", 500);
     }
     if (++this.calls > 40 || Date.now() - this.started > 20000) {
@@ -172,8 +172,9 @@ export class StripeReader {
       reply = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(10000),
         headers: { Authorization: "Bearer " + this.config.api_key, "Stripe-Version": STRIPE_VERSION } });
     } catch { throw new StripeError("stripe_transport_unavailable", 503, true); }
-    const id = reply.headers.get("request-id");
-    if (id && /^req_[A-Za-z0-9]{1,128}$/.test(id)) this.request_ids.push(id);
+    const nativeId = reply.headers.get("request-id");
+    const id = nativeId && /^req_[A-Za-z0-9]{1,128}$/.test(nativeId) ? nativeId : null;
+    if (id) this.request_ids.push(id);
     if (!reply.ok) {
       throw new StripeError(reply.status === 401 || reply.status === 403 ? "stripe_access_denied" :
         reply.status === 429 ? "stripe_rate_limited" : "stripe_source_unavailable", 503, true, id);
@@ -191,8 +192,8 @@ export class StripeReader {
       throw new StripeError("stripe_account_mismatch", 503, true);
     }
   }
-  async resource(path: string, id: string, objectType: string): Promise<StripeObject> {
-    const value = await this.get(path + "/" + id);
+  async resource(path: string, id: string, objectType: string, params: Record<string, string> = {}): Promise<StripeObject> {
+    const value = await this.get(path + "/" + id, params);
     if (value.id !== id || value.object !== objectType || value.livemode !== (this.config.mode === "live")) {
       throw new StripeError("stripe_resource_scope_mismatch", 502, true);
     }
