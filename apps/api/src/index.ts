@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { EconomicPeriodError, parseEconomicPeriod, readEconomicPeriod, type EconomicPeriod } from "./economics-period";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
@@ -468,6 +469,16 @@ export class MoneyLedger extends DurableObject<Env> {
     return row ? JSON.parse(row.body) as Observation : null;
   }
 
+  async economicPeriod(period: EconomicPeriod): Promise<{ status: number; body: string }> {
+    try {
+      const result = this.ctx.storage.transactionSync(() => readEconomicPeriod(this.ctx.storage.sql, period));
+      return { status: 200, body: JSON.stringify(result) };
+    } catch (error) {
+      if (error instanceof EconomicPeriodError) return { status: error.status, body: JSON.stringify({ error: error.code }) };
+      throw error;
+    }
+  }
+
   async economics(product: string, currency: string) {
     const rows = this.ctx.storage.sql.exec<{
       kind: Kind; channel: Channel; amount_minor: number;
@@ -733,6 +744,18 @@ export default {
       return Response.json({ ...result, event_id: value.event_id }, {
         status: result.status === "created" ? 201 : 200,
       });
+    }
+    if (url.pathname === "/v1/economics/period") {
+      if (request.method !== "GET") return response("method_not_allowed", 405);
+      try {
+        const result = await ledger.economicPeriod(parseEconomicPeriod(url));
+        return new Response(result.body, { status: result.status, headers: {
+          "Content-Type": "application/json", "Cache-Control": "no-store",
+        } });
+      } catch (error) {
+        if (error instanceof EconomicPeriodError) return response(error.code, error.status);
+        throw error;
+      }
     }
     if (request.method === "GET" && url.pathname === "/v1/economics") {
       const product = url.searchParams.get("product_id");
