@@ -332,23 +332,32 @@ it("counts a renewal as a new underlying charge, not another notification of the
 });
 it("waits for one source refresh to finish before allowing the next import", async () => {
   const f = fixture();
-  let release: (() => void) | undefined;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  let entered: (() => void) | undefined;
-  const started = new Promise<void>(resolve => { entered = resolve; });
+  let entered = false, released = false;
   const original = f.transport;
-  const network = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    if (String(url).endsWith("/account")) { entered!(); await gate; }
+  vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/account") && !entered) {
+      entered = true;
+      const deadline = Date.now() + 2000;
+      // Keep timer/stream promises in the acquiring Durable Object's I/O context.
+      while (!released) {
+        if (Date.now() >= deadline) throw new Error("fixture was not released");
+        await new Promise<void>(resolve => setTimeout(resolve, 1));
+      }
+    }
     return original(url, init);
-  });
-  vi.stubGlobal("fetch", network);
+  }));
   const first = api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
-  await started;
-  const concurrent = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
-  expect(concurrent.status).toBe(503);
-  expect(await concurrent.json()).toMatchObject({ error: "stripe_import_busy" });
-  release!();
-  expect(await (await first).json()).toMatchObject({ created: 1 });
+  let completed: Response;
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    const concurrent = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+    expect(concurrent.status).toBe(503);
+    expect(await concurrent.json()).toMatchObject({ error: "stripe_import_busy" });
+  } finally {
+    released = true;
+    completed = await first;
+  }
+  expect(await completed.json()).toMatchObject({ created: 1 });
   expect(await (await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id })).json()).toMatchObject({ duplicate: 1 });
 });
 it("does not trust posted event identities when Stripe returns different native evidence", async () => {
