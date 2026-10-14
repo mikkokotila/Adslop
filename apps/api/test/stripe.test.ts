@@ -376,3 +376,52 @@ it("rejects pagination cycles, empty continuation pages and unbounded payloads",
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Length": "2000001" } })));
   await expect(new StripeReader(f.config).get("/account")).rejects.toThrow("stripe_invalid_source");
 });
+
+async function periodReport(runtime: Env, from = "2026-10-05", to = "2026-10-11", currency = "EUR") {
+  return worker.fetch(new Request("https://adslop.test/v1/economics/period?product_id=stripe-test&currency=" +
+    currency + "&from=" + from + "&to=" + to + "&time_zone=Europe%2FHelsinki", { headers: operator }), runtime);
+}
+it("compares native live Stripe cash and advertising in the same dated read snapshot", async () => {
+  const sandbox = fixture();
+  await api("/sandbox/import", sandbox.runtime, { invoice_id: sandbox.invoice.id });
+  const f = fixture("live"); f.refund("re_Dated", 255);
+  await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  const money = f.runtime.MONEY;
+  await runInDurableObject(money.get(money.idFromName("private-operator")), async (_instance, state) => {
+    state.storage.sql.exec("INSERT INTO google_cost_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "1234567890", "123", "2026-10-07", 1, "stripe-test", "EUR", "Europe/Helsinki", "2000001",
+      "2026-10-08T12:00:00.000Z");
+  });
+  const result = await periodReport(f.runtime);
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({
+    money_in: { observed_receipts_minor: "1255", observed_refunds_minor: "255", observed_net_receipts_minor: "1000",
+      observations: [
+        { source: "stripe", event_id: "ch_ContractFixture", invoice_tax_minor: "255", time_basis: "invoice_payment_paid_at" },
+        { source: "stripe", event_id: "re_Dated", refund_tax_minor: null, time_basis: "successful_refund_created_at" },
+      ] }, money_out: { observed_spend_micros: "2000001" }, observed_difference_micros: "7999999",
+    coverage: { complete: false, verified_zero: false },
+  });
+  expect(await (await periodReport(f.runtime, "2026-10-07", "2026-10-07")).json()).toMatchObject({
+    money_in: { observed_receipts_minor: "1255", observed_refunds_minor: "0" },
+  });
+  expect(await (await periodReport(f.runtime, "2026-10-08", "2026-10-08")).json()).toMatchObject({
+    money_in: { observed_receipts_minor: "0", observed_refunds_minor: "255", observed_net_receipts_minor: "-255" },
+  });
+  expect(await (await periodReport(f.runtime, "2026-10-05", "2026-10-11", "USD")).json()).toMatchObject({
+    money_in: { status: "no_observations" }, observed_difference_micros: null,
+  });
+});
+it("retains unresolved Stripe source breaks in dated reports rather than displaying a cash difference", async () => {
+  const f = fixture("live");
+  await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  f.charge.disputed = true;
+  await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  const result = await periodReport(f.runtime);
+  expect(await result.json()).toMatchObject({
+    money_in: { status: "reconciliation_required", observed_net_receipts_minor: "1255",
+      stripe_reconciliation_breaks: [{ invoice_id: f.invoice.id, error: "stripe_dispute_requires_reconciliation" }] },
+    observed_difference_micros: null,
+    coverage: { reasons: expect.arrayContaining(["stripe_cash_reconciliation_required"]) },
+  });
+});
