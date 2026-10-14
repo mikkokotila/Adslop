@@ -1,3 +1,8 @@
+# v0.11.0
+
+- Add native Stripe subscription cash and refund verification with separate sandbox evidence.
+- Preserve exact cash identities and explicit unsupported-source dispositions without changing checkout or paid delivery.
+
 # v0.10.0
 
 - Discover eligible Meta Pages and account images without exposing Page tokens.

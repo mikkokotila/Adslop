@@ -1,4 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
+import { StripeError, StripeReader, STRIPE_VERSION, stripeConnection, verifyStripeWebhook,
+  boundedBytes, productId, type StripeSettings, type StripeMode, type StripeConnection } from "./stripe";
+import { StripeJournal, importStripeCash, type StripeImport, type StripeReply } from "./stripe-ledger";
 import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } from "./google";
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
@@ -25,7 +28,7 @@ export interface Observation {
   occurred_at: string;
 }
 
-export interface Env extends GoogleAdsConfig {
+export interface Env extends GoogleAdsConfig, StripeSettings {
   MONEY: DurableObjectNamespace<MoneyLedger>;
   API_TOKEN: string;
   BUNNY_ACCESS_KEY: string;
@@ -83,6 +86,7 @@ type RecordResult = {
 export class MoneyLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    new StripeJournal(this.ctx.storage.sql).create();
     new GoogleCostJournal(this.ctx.storage.sql).create();
     new MetaCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
@@ -131,6 +135,21 @@ export class MoneyLedger extends DurableObject<Env> {
         to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
       )
     `);
+  }
+
+  async stripeImport(config: StripeConnection, input: StripeImport): Promise<StripeReply> {
+    return importStripeCash(config, input, this.ctx.storage.sql,
+      operation => this.ctx.storage.transactionSync(operation));
+  }
+
+  async stripeEvidence(mode: StripeMode, type: "events" | "effects", id: string): Promise<StripeReply> {
+    try {
+      const journal = new StripeJournal(this.ctx.storage.sql);
+      return { status: 200, body: type === "events" ? journal.events(mode, id) : journal.effects(mode, id) };
+    } catch (error) {
+      if (error instanceof StripeError) return { status: error.status, body: { error: error.code } };
+      throw error;
+    }
   }
 
   async metaAdWrite(path: string, key: string, body: string, token?: string): Promise<{ body: string; status: number }> {
@@ -491,7 +510,8 @@ export class MoneyLedger extends DurableObject<Env> {
         if (row.channel) byChannel[row.channel] -= amount;
       }
     }
-    const subscriptionRevenue = receipts - refunds;
+    const stripe = new StripeJournal(this.ctx.storage.sql).totals(product, currency);
+    const subscriptionRevenue = receipts - refunds + stripe.receipts - stripe.refunds;
     const fractionDigits = new Intl.NumberFormat("en", {
       style: "currency", currency,
     }).resolvedOptions().maximumFractionDigits;
@@ -530,9 +550,11 @@ export class MoneyLedger extends DurableObject<Env> {
       },
       evidence: [
         "admitted_observations",
+        ...(stripe.count ? ["stripe_verified_cash"] : []),
         ...(googleRows.length ? ["google_ads_daily_revisions"] : []),
         ...(metaRows.length ? ["meta_ads_daily_revisions"] : []),
       ].join("_and_") + (googleRows.length || metaRows.length ? "" : "_only"),
+      ...(stripe.count ? { stripe_cash_basis: "customer_cash_including_tax_before_fees" } : {}),
       attribution: "none",
       coverage: "not_verified",
     };
@@ -557,6 +579,70 @@ function response(error: string, status: number): Response {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const stripeUrl = new URL(request.url);
+    const stripeRoute = /^\/v1\/stripe\/(live|sandbox)\/(webhook|status|import|events|effects)(?:\/(evt_[A-Za-z0-9]{1,96}))?$/.exec(stripeUrl.pathname);
+    if (stripeRoute) {
+      const mode = stripeRoute[1] as StripeMode;
+      const operation = stripeRoute[2];
+      const reply = (body: unknown, status = 200) => Response.json(body, { status,
+        headers: { "Cache-Control": "no-store" } });
+      if (operation !== "webhook") {
+        if (!env.API_TOKEN) return reply({ error: "api_token_not_configured" }, 503);
+        if (!await authorized(request.headers.get("Authorization"), env.API_TOKEN)) {
+          return reply({ error: "unauthorized" }, 401);
+        }
+      }
+      try {
+        if (stripeUrl.search && operation !== "effects") throw new StripeError("stripe_invalid_query", 400);
+        const validMethod = ["webhook", "import"].includes(operation) ? "POST" : "GET";
+        if (request.method !== validMethod || (operation === "events") !== !!stripeRoute[3]) {
+          return reply({ error: "stripe_invalid_route" }, 405);
+        }
+        const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+        if (operation === "effects" || operation === "events") {
+          const id = operation === "events" ? stripeRoute[3] : stripeUrl.searchParams.get("product_id");
+          if (!productId(id) || (operation === "effects" &&
+              (stripeUrl.searchParams.size !== 1 || !stripeUrl.searchParams.has("product_id")))) {
+            throw new StripeError("stripe_invalid_query", 400);
+          }
+          const result = await ledger.stripeEvidence(mode, operation, id);
+          return reply(result.body, result.status);
+        }
+        const config = stripeConnection(env, mode);
+        if (operation === "status") {
+          await new StripeReader(config).account();
+          return reply({ mode, status: "connected", account_id: config.account_id, api_version: STRIPE_VERSION,
+            prices: config.prices, coverage: "not_verified", cash_basis: "customer_cash_including_tax_before_fees" });
+        }
+        let input: StripeImport;
+        if (operation === "webhook") {
+          const verified = await verifyStripeWebhook(request, config);
+          input = { event_id: verified.event.id, ...verified };
+        } else {
+          let parsed: unknown;
+          try { parsed = JSON.parse(new TextDecoder().decode(await boundedBytes(request, 2048))); }
+          catch (error) {
+            if (error instanceof StripeError) throw error;
+            throw new StripeError("stripe_invalid_json", 400);
+          }
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new StripeError("stripe_invalid_import", 400);
+          }
+          const values = Object.entries(parsed);
+          if (values.length !== 1 || !["event_id", "invoice_id"].includes(values[0][0]) ||
+              typeof values[0][1] !== "string" || !new RegExp("^" +
+                (values[0][0] === "event_id" ? "evt" : "in") + "_[A-Za-z0-9]{1,96}$").test(values[0][1])) {
+            throw new StripeError("stripe_invalid_import", 400);
+          }
+          input = Object.fromEntries(values);
+        }
+        const result = await ledger.stripeImport(config, input);
+        return reply(result.body, result.status);
+      } catch (error) {
+        if (error instanceof StripeError) return reply({ error: error.code, request_id: error.request_id }, error.status);
+        throw error;
+      }
+    }
     if (!env.API_TOKEN) return response("api_token_not_configured", 503);
     if (!await authorized(request.headers.get("Authorization"), env.API_TOKEN)) {
       return response("unauthorized", 401);

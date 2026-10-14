@@ -177,3 +177,20 @@ Every delivery PR closes one open slice issue, stays within its declared file sc
 ## License
 
 The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
+
+
+## Stripe cash integration candidate
+
+The Stripe adapter is independent of Eightchord checkout and subscription access. It exposes signature-authenticated `POST /v1/stripe/{live|sandbox}/webhook` and bearer-protected `GET /v1/stripe/{mode}/status`, `POST /v1/stripe/{mode}/import`, `GET /v1/stripe/{mode}/events/{event_id}`, and `GET /v1/stripe/{mode}/effects?product_id=eightchord`.
+
+Set separate encrypted `STRIPE_LIVE_CONNECTION` and `STRIPE_SANDBOX_CONNECTION` JSON secrets with `account_id`, `api_key`, `webhook_secret`, and `prices`. Each native Price ID maps to an object with `product_id` and `stripe_product_id`. Real account and price IDs must come from the checkout engineer. Adslop uses only read permissions for account identity, Events, Invoices/lines/payments, Prices, PaymentIntents, Charges and Refunds. No API writes, customer charges, entitlement changes or payout operations are implemented.
+
+The accounting basis is gross captured subscription customer cash, including tax and before fees, minus actual successful cash refunds. Invoice tax is retained separately; refund tax allocation is unknown, not invented. This is not earned revenue, tax-exclusive sales or settled bank payout. One fully paid recurring product/invoice and one captured payment are supported; split/credited/off-Stripe payments, unmatched price mappings and disputes are quarantined. Mode/account identities are checked natively; sandbox effects never enter live economics. Charge/refund IDs, not notification IDs, prevent duplicate cash. A repeat operator import of a known event or invoice re-reads the native source but cannot create financial operations. Invoice import remains usable after event-retrieval retention expires.
+
+Receipt occurrence uses InvoicePayment paid_at; successful refund occurrence uses the Refund created timestamp, not an asserted bank-settlement time. Service periods are retained separately. Stored evidence contains safe IDs, money, timestamps and dispositions rather than customer PII, raw event bodies or credentials. Coverage remains not_verified. Do not also forward the same Stripe payments via Bunny/manual observations under another source name.
+
+Register a separate snapshot webhook destination, distinct from Eightchord's fulfillment destination. Configure invoice.paid, invoice.payment_succeeded, invoice.payment_failed, refund.created, refund.updated, refund.failed, charge.refunded and charge.dispute events. Use its own signing secret. The implementation verifies raw-body HMAC signatures with a five-minute timestamp tolerance, then independently retrieves native objects using the pinned 2026-07-29.dahlia API. It does not trust webhook amount fields.
+
+**Acceptance is pending**: access-control tests are not payment-admission proof. Full accounting-path and authenticated sandbox validation must finish before this candidate is described as ready. No live transaction has been created or imported by the implementation work.
+
+Sources: [Stripe webhooks](https://docs.stripe.com/webhooks), [Invoice Payment](https://docs.stripe.com/api/invoice-payment/object), [Refund](https://docs.stripe.com/api/refunds/object), [API changelog](https://docs.stripe.com/changelog).
