@@ -100,9 +100,12 @@ export class StripeJournal {
       "AND json_extract(d.body,'$.status') IN ('retryable','quarantined') " +
       "AND d.id=(SELECT MAX(x.id) FROM stripe_deliveries x WHERE x.mode=d.mode AND x.account_id=d.account_id " +
       "AND json_extract(x.body,'$.invoice_id')=json_extract(d.body,'$.invoice_id')) " +
-      "AND EXISTS(SELECT 1 FROM stripe_effects e WHERE e.mode=d.mode AND e.account_id=d.account_id " +
+      "AND (EXISTS(SELECT 1 FROM stripe_effects e WHERE e.mode=d.mode AND e.account_id=d.account_id " +
       "AND e.invoice_id=json_extract(d.body,'$.invoice_id') AND e.product_id=? AND e.currency=?) " +
-      "ORDER BY d.id", product, currency).toArray();
+      "OR EXISTS(SELECT 1 FROM stripe_deliveries known WHERE known.mode=d.mode AND known.account_id=d.account_id " +
+      "AND json_extract(known.body,'$.invoice_id')=json_extract(d.body,'$.invoice_id') " +
+      "AND json_extract(known.body,'$.product_id')=? AND json_extract(known.body,'$.currency')=?)) " +
+      "ORDER BY d.id", product, currency, product, currency).toArray();
     return rows.map(row => {
       const body = JSON.parse(row.body) as Record<string, unknown>;
       return { account_id: row.account_id, invoice_id: body.invoice_id, error: body.error,
@@ -154,7 +157,8 @@ export async function importStripeCash(config: StripeConnection, input: StripeIm
     if (!(error instanceof StripeError)) throw error;
     const result = { ...common, status: error.retryable ? "retryable" : "quarantined",
       error: error.code, request_ids: client.request_ids,
-      invoice_id: resolution.invoice_id ?? journal.invoiceFor(config, identity, resolution.charge_id) };
+      invoice_id: resolution.invoice_id ?? journal.invoiceFor(config, identity, resolution.charge_id),
+      product_id: resolution.product_id ?? null, currency: resolution.currency ?? null };
     transaction(() => journal.delivery(config, identity, result));
     return { status: error.retryable ? 503 : input.event ? 200 : 422, body: result };
   }

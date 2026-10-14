@@ -425,3 +425,32 @@ it("retains unresolved Stripe source breaks in dated reports rather than display
     coverage: { reasons: expect.arrayContaining(["stripe_cash_reconciliation_required"]) },
   });
 });
+
+it("does not display newly quarantined partial customer cash as a verified zero", async () => {
+  const f = fixture("live"); f.invoice.status = "open"; f.invoice.amount_paid = 300;
+  const rejected = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(rejected.status).toBe(422);
+  expect(await (await economics(f.runtime)).json()).toMatchObject({
+    subscription_revenue_minor: null, difference_minor: null, cash_status: "reconciliation_required",
+  });
+  expect(await (await periodReport(f.runtime)).json()).toMatchObject({
+    money_in: { status: "reconciliation_required" }, observed_difference_micros: null,
+    coverage: { complete: false, verified_zero: false },
+  });
+  f.transport.mockImplementationOnce(async () => Response.json({ error: "unavailable" }, { status: 503 }));
+  expect((await api("/live/import", f.runtime, { invoice_id: f.invoice.id })).status).toBe(503);
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: null });
+  f.invoice.status = "paid"; f.invoice.amount_paid = 1255;
+  expect(await (await api("/live/import", f.runtime, { invoice_id: f.invoice.id })).json()).toMatchObject({ created: 1 });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 1255 });
+});
+it("does not mistake special Stripe currency wire units for ledger minor units", async () => {
+  const f = fixture();
+  for (const currency of ["isk", "ugx"]) {
+    f.invoice.currency = currency;
+    const response = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: "stripe_currency_units_unsupported", status: "quarantined" });
+  }
+  expect(await (await api("/sandbox/effects?product_id=stripe-test", f.runtime)).json()).toMatchObject({ effects: [] });
+});

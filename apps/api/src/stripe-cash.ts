@@ -26,7 +26,9 @@ export interface StripeCashBatch {
   reason: string | null;
   pending_refunds: string[];
 }
-export interface StripeResolution { invoice_id: string | null; charge_id: string | null }
+export interface StripeResolution {
+  invoice_id: string | null; charge_id: string | null; product_id?: string; currency?: string;
+}
 function scope(value: StripeObject, client: StripeReader, kind: string): void {
   if (value.object !== kind || value.livemode !== (client.config.mode === "live")) {
     throw new StripeError("stripe_resource_scope_mismatch", 502, true);
@@ -36,6 +38,8 @@ function currency(value: unknown): string {
   if (typeof value !== "string" || !/^[a-z]{3}$/.test(value)) {
     throw new StripeError("stripe_invalid_currency", 502, true);
   }
+  // Stripe's legacy two-decimal wire units differ from the ledger currency scale here.
+  if (value === "isk" || value === "ugx") throw new StripeError("stripe_currency_units_unsupported");
   return value.toUpperCase();
 }
 async function invoiceForIntent(client: StripeReader, intentId: string): Promise<string> {
@@ -96,6 +100,8 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
     service.push({ line_id: stripeId(line.id, "il"), price_id: priceId, stripe_product_id: product, from, to });
   }
   if (products.size !== 1) throw new StripeError("stripe_mixed_product_invoice");
+  resolution.product_id = [...products][0];
+  resolution.currency = unit;
   const product = [...products][0];
   service.sort((a, b) => a.line_id.localeCompare(b.line_id));
   if (invoice.status !== "paid") {
