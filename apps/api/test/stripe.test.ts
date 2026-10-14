@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { reset, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
-import { StripeReader, STRIPE_VERSION, type StripeConnection, type StripeMode, type StripeObject } from "../src/stripe";
+import { StripeReader, STRIPE_VERSION, stripeProductId, stripeConnection, type StripeConnection, type StripeMode, type StripeObject } from "../src/stripe";
 
 const root = "https://adslop.test/v1/stripe";
 const operator = { Authorization: "Bearer test-only-economic-ledger" };
@@ -475,4 +475,35 @@ it("binds fresh signed invoice events to admitted cash even if native account or
     await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
     expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 1255 });
   }
+});
+
+it("admits an exactly mapped merchant-defined Stripe Product ID", async () => {
+  const f = fixture();
+  const custom = "contract_basic";
+  const configuration = JSON.parse(f.runtime.STRIPE_SANDBOX_CONNECTION!);
+  configuration.prices[price].stripe_product_id = custom;
+  f.runtime.STRIPE_SANDBOX_CONNECTION = JSON.stringify(configuration);
+  f.nativePrice.product = custom;
+  f.line.pricing = { type: "price_details", price_details: { price, product: custom } };
+  const response = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ status: "admitted", created: 1 });
+  expect(await (await api("/sandbox/effects?product_id=stripe-test", f.runtime)).json())
+    .toMatchObject({ effects: [{ service_periods: [{ stripe_product_id: custom }] }] });
+  f.nativePrice.product = "contract_other";
+  const mismatch = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(mismatch.status).toBe(422);
+  expect(await mismatch.json()).toMatchObject({ error: "stripe_price_contract_mismatch" });
+});
+it("bounds custom Product IDs without relaxing other Stripe resource identities", () => {
+  expect(stripeProductId("prod_ContractFixture")).toBe("prod_ContractFixture");
+  expect(stripeProductId("contract_basic")).toBe("contract_basic");
+  for (const invalid of ["", ".", "..", "../product", "product?other=1", "product\n", "x".repeat(129), null, {}]) {
+    expect(() => stripeProductId(invalid)).toThrow("stripe_invalid_product_identity");
+  }
+  const f = fixture();
+  const value = JSON.parse(f.runtime.STRIPE_SANDBOX_CONNECTION!);
+  value.account_id = "merchant_account";
+  expect(() => stripeConnection({ STRIPE_SANDBOX_CONNECTION: JSON.stringify(value) }, "sandbox"))
+    .toThrow("stripe_invalid_configuration");
 });

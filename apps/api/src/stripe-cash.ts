@@ -1,6 +1,6 @@
 /** Interpret native Stripe subscription cash, not checkout state or earned revenue. */
 import { StripeError, StripeReader, stripeEvent, stripeId, stripeMoney, stripeObject,
-  stripeTime, type StripeEvent, type StripeObject } from "./stripe";
+  stripeTime, stripeProductId, type StripeEvent, type StripeObject } from "./stripe";
 
 export interface StripeCashEffect {
   resource_id: string;
@@ -82,7 +82,7 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
     if (pricing.type !== "price_details") throw new StripeError("stripe_unsupported_pricing");
     const details = stripeObject(pricing.price_details);
     const priceId = stripeId(details.price, "price");
-    const product = stripeId(details.product, "prod");
+    const product = stripeProductId(details.product);
     const mapped = client.config.prices[priceId];
     if (!mapped || mapped.stripe_product_id !== product) throw new StripeError("stripe_unmapped_price");
     products.add(mapped.product_id);

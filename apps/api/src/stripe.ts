@@ -32,6 +32,13 @@ export function stripeId(value: unknown, prefix: string): string {
   }
   return value;
 }
+/** Products may have merchant-defined IDs, unlike generated payment-resource IDs. */
+export function stripeProductId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)) {
+    throw new StripeError("stripe_invalid_product_identity", 502, true);
+  }
+  return value;
+}
 export function stripeMoney(value: unknown): bigint {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new StripeError("stripe_invalid_money", 502, true);
@@ -72,7 +79,7 @@ export function stripeConnection(env: StripeSettings, mode: StripeMode): StripeC
           Object.keys(item).some(k => !["product_id", "stripe_product_id"].includes(k))) {
         throw new Error("invalid_product_mapping");
       }
-      prices[id] = { product_id: item.product_id, stripe_product_id: stripeId(item.stripe_product_id, "prod") };
+      prices[id] = { product_id: item.product_id, stripe_product_id: stripeProductId(item.stripe_product_id) };
     }
     return { mode, account_id: account, api_key: value.api_key, webhook_secret: value.webhook_secret, prices };
   } catch {
