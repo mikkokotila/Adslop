@@ -454,3 +454,25 @@ it("does not mistake special Stripe currency wire units for ledger minor units",
   }
   expect(await (await api("/sandbox/effects?product_id=stripe-test", f.runtime)).json()).toMatchObject({ effects: [] });
 });
+
+it("binds fresh signed invoice events to admitted cash even if native account or event reads fail", async () => {
+  const f = fixture("live");
+  await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  for (const stage of ["account", "events"]) {
+    if (stage === "events") {
+      f.transport.mockImplementationOnce(async () => Response.json(f.nativeAccount));
+    }
+    f.transport.mockImplementationOnce(async () => Response.json({ error: "temporarily_unavailable" }, { status: 503 }));
+    const retry = await signed(f.event("evt_Fresh" + stage), f.config, f.runtime);
+    expect(retry.status).toBe(503);
+    expect(await retry.json()).toMatchObject({ status: "retryable", invoice_id: f.invoice.id });
+    expect(await (await economics(f.runtime)).json()).toMatchObject({
+      subscription_revenue_minor: null, difference_micros: null, cash_status: "reconciliation_required",
+    });
+    expect(await (await periodReport(f.runtime)).json()).toMatchObject({
+      money_in: { status: "reconciliation_required" }, observed_difference_micros: null,
+    });
+    await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+    expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 1255 });
+  }
+});

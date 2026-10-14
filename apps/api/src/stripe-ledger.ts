@@ -83,14 +83,15 @@ export class StripeJournal {
   invoiceFor(config: StripeConnection, identity: string, resource: string | null): string | null {
     if (resource) {
       const effect = this.sql.exec<{ invoice_id: string }>(
-        "SELECT invoice_id FROM stripe_effects WHERE mode=? AND account_id=? AND resource_id=?",
-        config.mode, config.account_id, resource).toArray()[0];
+        "SELECT invoice_id FROM stripe_effects WHERE mode=? AND account_id=? AND (resource_id=? OR invoice_id=?) LIMIT 1",
+        config.mode, config.account_id, resource, resource).toArray()[0];
       if (effect) return effect.invoice_id;
     }
     const previous = this.sql.exec<{ invoice_id: string }>(
       "SELECT json_extract(body,'$.invoice_id') AS invoice_id FROM stripe_deliveries " +
-      "WHERE mode=? AND account_id=? AND event_id=? AND json_extract(body,'$.invoice_id') IS NOT NULL " +
-      "ORDER BY id DESC LIMIT 1", config.mode, config.account_id, identity).toArray()[0];
+      "WHERE mode=? AND account_id=? AND (event_id=? OR json_extract(body,'$.invoice_id')=?) " +
+      "AND json_extract(body,'$.invoice_id') IS NOT NULL ORDER BY id DESC LIMIT 1",
+      config.mode, config.account_id, identity, resource).toArray()[0];
     return previous?.invoice_id ?? null;
   }
   reconciliationBreaks(product: string, currency: string): Record<string, unknown>[] {
