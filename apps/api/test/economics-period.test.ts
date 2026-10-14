@@ -135,3 +135,35 @@ it("leaves the all-time economic endpoint unchanged", async () => {
   expect(await response.json()).toMatchObject({ subscription_revenue_minor: 0,
     advertising_spend_minor: 0, difference_minor: 0, coverage: "not_verified", attribution: "none" });
 });
+
+it("limits actual period rows rather than adjacent days in the UTC envelope", async () => {
+  const money = (env as Env).MONEY;
+  await runInDurableObject(money.get(money.idFromName("private-operator")), async (_instance, state) => {
+    state.storage.sql.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<12000)
+      INSERT INTO observations
+      SELECT 'period-test','bounded-fixture',CAST(i AS TEXT),'subscription_receipt',1,'EUR',NULL,
+        CASE WHEN i<=4000 THEN '2026-10-06T12:00:00.000Z'
+             WHEN i<=8000 THEN '2026-10-07T12:00:00.000Z' ELSE '2026-10-08T12:00:00.000Z' END,'{}'
+      FROM n`);
+  });
+  const target = url.replace("2026-10-05", "2026-10-07").replace("2026-10-11", "2026-10-07")
+    .replace("Europe%2FHelsinki", "UTC");
+  const response = await get(target);
+  expect(response.status).toBe(200);
+  const result = await response.json() as { money_in: { observations: object[]; observed_receipts_minor: string } };
+  expect(result.money_in.observations).toHaveLength(4000);
+  expect(result.money_in.observed_receipts_minor).toBe("4000");
+  const tooMany = await get(url.replace("Europe%2FHelsinki", "UTC"));
+  expect(tooMany.status).toBe(413);
+});
+it("reports an invalid stored source timezone as a server error, not a bad query", async () => {
+  const money = (env as Env).MONEY;
+  await runInDurableObject(money.get(money.idFromName("private-operator")), async (_instance, state) => {
+    state.storage.sql.exec("INSERT INTO google_cost_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "1234567890", "123", "2026-10-07", 1, "period-test", "EUR", "InvalidZone", "1",
+      "2026-10-08T12:00:00.000Z");
+  });
+  const response = await get();
+  expect(response.status).toBe(500);
+  expect(await response.json()).toMatchObject({ error: "economic_invalid_stored_time_zone" });
+});

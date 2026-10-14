@@ -23,9 +23,9 @@ function date(value: string | null): value is string {
   const parsed = new Date(value + "T00:00:00.000Z");
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
-function zone(value: string): string {
+function zone(value: string, stored = false): string {
   try { return new Intl.DateTimeFormat("en", { timeZone: value }).resolvedOptions().timeZone; }
-  catch { throw new EconomicPeriodError("economic_invalid_time_zone"); }
+  catch { throw new EconomicPeriodError(stored ? "economic_invalid_stored_time_zone" : "economic_invalid_time_zone", stored ? 500 : 400); }
 }
 export function parseEconomicPeriod(url: URL): EconomicPeriod {
   const q = url.searchParams;
@@ -99,7 +99,7 @@ export function summarizeEconomicPeriod(period: EconomicPeriod, sources: PeriodS
     comparable: boolean; micros: bigint; rows: object[]; latest_observed_at: string }>();
   let nativeSameZone = 0n;
   for (const row of selected.values()) {
-    const sourceZone = zone(row.time_zone);
+    const sourceZone = zone(row.time_zone, true);
     const key = JSON.stringify([row.platform, row.account_id, sourceZone]);
     const comparable = sourceZone === period.time_zone;
     const micros = BigInt(row.amount) * (row.platform === "meta" ? factor : 1n);
@@ -146,10 +146,17 @@ export function readEconomicPeriod(sql: SqlStorage, period: EconomicPeriod): obj
   // A UTC envelope contains all possible local-day instants; final selection uses IANA timezone rules.
   const low = new Date(Date.parse(period.from) - DAY).toISOString();
   const high = new Date(Date.parse(period.to) + 2 * DAY).toISOString();
-  const observations = sql.exec<PeriodObservation>(
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: period.time_zone,
+    year: "numeric", month: "2-digit", day: "2-digit" });
+  const observations: PeriodObservation[] = [];
+  // Stream the envelope: adjacent local days do not consume the in-period row limit.
+  for (const row of sql.exec<PeriodObservation>(
     "SELECT source,event_id,kind,amount_minor,channel,occurred_at FROM observations " +
     "WHERE product_id=? AND currency=? AND occurred_at>=? AND occurred_at<? " +
-    "ORDER BY occurred_at,source,event_id LIMIT 10001", period.product_id, period.currency, low, high).toArray();
+    "ORDER BY occurred_at,source,event_id", period.product_id, period.currency, low, high)) {
+    if (between(localDate(row.occurred_at, formatter), period)) observations.push(row);
+    if (observations.length > MAX_ROWS) throw new EconomicPeriodError("economic_period_row_limit", 413);
+  }
   const google = sql.exec<PeriodCost>(
     "SELECT 'google' AS platform,r.customer_id AS account_id,r.campaign_id,r.local_date,r.revision," +
     "r.time_zone,r.cost_micros AS amount,r.observed_at FROM google_cost_revisions r " +
