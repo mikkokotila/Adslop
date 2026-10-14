@@ -1,7 +1,13 @@
+# v0.12.0
+
+- Verify signed Stripe subscription cash and refunds against native account, invoice, payment and charge records.
+- Preserve sandbox isolation, immutable source identities, paginated evidence and visible reconciliation failures.
+- Include live Stripe cash and source gaps in dated economic evidence without altering website checkout or activating paid delivery.
+
 # v0.11.0
 
-- Add native Stripe subscription cash and refund verification with separate sandbox evidence.
-- Preserve exact cash identities and explicit unsupported-source dispositions without changing checkout or paid delivery.
+- Report dated subscription cash and native advertising evidence with exact micro-unit arithmetic.
+- Distinguish missing evidence from verified zero and withhold comparisons across incompatible source timezones.
 
 # v0.10.0
 

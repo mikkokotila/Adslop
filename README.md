@@ -120,6 +120,16 @@ Meta Graph requests use Workers-supported manual redirects and reject redirect
 responses, preventing authorization from being forwarded to another destination.
 Rotate user access tokens before their reported expiry to retain reporting access.
 
+## Dated economic evidence
+
+Authenticated `GET /v1/economics/period?product_id=eightchord&currency=USD&from=2026-10-05&to=2026-10-11&time_zone=Europe%2FHelsinki` reads existing cash observations and the latest imported Google/Meta daily cost revisions. Dates are inclusive, with an explicit IANA reporting timezone; ranges are limited to 366 calendar days and 10,000 rows per source. The read takes one Durable Object snapshot, performs no external requests, creates no observations and cannot activate ads. The original all-time `/v1/economics` contract is unchanged.
+
+Cash and manually admitted spend/credits are filtered by occurrence in the requested timezone (including daylight-saving changes). Native advertising daily rows retain their source timezone. Rows from a different timezone are displayed separately and make the requested-period difference unavailable: Adslop never prorates a daily report or pretends that identical calendar dates are identical UTC intervals. Each native cost identity contributes only its latest stored revision, not every historical correction or every reporting dimension.
+
+All monetary subtotals are exact decimal integer strings, in currency minor units for receipts/refunds and micro-units for combined advertising cost. Each currency has its own report; no FX rate or currency conversion is invented. `observed_difference_micros` is present only when both sides have observations and the native timezones align. It is a difference of observed evidence, **not proof of full-period profit**. No receipt data is `no_observations`, not verified zero. Coverage always remains explicitly incomplete until actual source-completeness evidence exists. A null difference is not a loss or a zero. Legacy observation arrival times are unavailable; source cost rows retain their observation timestamp and revision.
+
+The reader reports the sources admitted by the current main branch. Stripe receipt admission is a separate pending capability; a live Stripe account does not itself populate this report. No dashboard, forecast, attribution rule, ad-account mutation or subscription-accounting change is introduced.
+
 ## Cloudflare deployment
 
 Merges to `main` run `.github/workflows/deploy_cloudflare.yml` with the locked
