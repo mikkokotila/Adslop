@@ -5,6 +5,10 @@ export type StripeObject = Record<string, unknown>;
 export interface StripeSettings {
   STRIPE_LIVE_CONNECTION?: string;
   STRIPE_SANDBOX_CONNECTION?: string;
+  STRIPE_LIVE_API_KEY?: string;
+  STRIPE_SANDBOX_API_KEY?: string;
+  STRIPE_LIVE_WEBHOOK_SECRET?: string;
+  STRIPE_SANDBOX_WEBHOOK_SECRET?: string;
 }
 export interface StripeConnection {
   mode: StripeMode;
@@ -63,6 +67,14 @@ export function stripeConnection(env: StripeSettings, mode: StripeMode): StripeC
     if (Object.keys(value).some(k => !["account_id", "api_key", "webhook_secret", "prices"].includes(k))) {
       throw new Error("unknown_configuration");
     }
+    const apiKey = mode === "live" ? env.STRIPE_LIVE_API_KEY : env.STRIPE_SANDBOX_API_KEY;
+    const webhookSecret = mode === "live" ? env.STRIPE_LIVE_WEBHOOK_SECRET : env.STRIPE_SANDBOX_WEBHOOK_SECRET;
+    if ((apiKey !== undefined && Object.hasOwn(value, "api_key")) ||
+        (webhookSecret !== undefined && Object.hasOwn(value, "webhook_secret"))) {
+      throw new Error("ambiguous_credentials");
+    }
+    if (apiKey !== undefined) value.api_key = apiKey;
+    if (webhookSecret !== undefined) value.webhook_secret = webhookSecret;
     const account = stripeId(value.account_id, "acct");
     if (typeof value.api_key !== "string" ||
         !new RegExp("^[sr]k_" + (mode === "live" ? "live" : "test") + "_[A-Za-z0-9]+$").test(value.api_key) ||

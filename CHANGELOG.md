@@ -1,3 +1,8 @@
+# v0.12.1
+
+- Connect separate encrypted Stripe API and webhook secrets without exposing credentials or weakening sandbox isolation.
+- Reject ambiguous credential locations before native source reads and preserve existing connection JSON support.
+
 # v0.12.0
 
 - Verify signed Stripe subscription cash and refunds against native account, invoice, payment and charge records.

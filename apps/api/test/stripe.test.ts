@@ -559,3 +559,63 @@ it.each(["account", "events"])("retains an unpaid invoice's product scope across
   const replay = await signed(f.event("evt_FirstPaymentReplay" + stage), f.config, f.runtime);
   expect(await replay.json()).toMatchObject({ status: "duplicate", created: 0, duplicate: 1 });
 });
+
+
+it.each(["live", "sandbox"] as const)("accepts separate Worker secrets for %s without exposing credentials", async mode => {
+  const f = fixture(mode);
+  const prefix = mode === "live" ? "STRIPE_LIVE" : "STRIPE_SANDBOX";
+  const runtime: Env = { ...f.runtime,
+    [prefix + "_CONNECTION"]: JSON.stringify({ account_id: account, prices: f.config.prices }),
+    [prefix + "_API_KEY"]: f.config.api_key,
+    [prefix + "_WEBHOOK_SECRET"]: f.config.webhook_secret };
+  const status = await api("/" + mode + "/status", runtime);
+  expect(status.status).toBe(200);
+  const body = await status.json();
+  expect(body).toMatchObject({ status: "connected", mode, account_id: account });
+  expect(JSON.stringify(body)).not.toContain(f.config.api_key);
+  expect(JSON.stringify(body)).not.toContain(f.config.webhook_secret);
+  const admitted = await signed(f.event("evt_Separate"), f.config, runtime);
+  expect(await admitted.json()).toMatchObject({ created: 1, status: "admitted" });
+  const repeated = await api("/" + mode + "/import", runtime, { invoice_id: f.invoice.id });
+  expect(await repeated.json()).toMatchObject({ created: 0, duplicate: 1 });
+  expect(await (await economics(runtime)).json()).toMatchObject({ subscription_revenue_minor: mode === "live" ? 1255 : 0 });
+  const unsigned = await worker.fetch(new Request(root + "/" + mode + "/webhook", { method: "POST", body: "{}" }), runtime);
+  expect(unsigned.status).toBe(400);
+});
+it("rejects ambiguous or incomplete separate credentials before source reads", async () => {
+  const f = fixture();
+  const metadata = { account_id: account, prices: f.config.prices };
+  const separate: Env = { ...f.runtime, STRIPE_SANDBOX_CONNECTION: JSON.stringify(metadata),
+    STRIPE_SANDBOX_API_KEY: f.config.api_key, STRIPE_SANDBOX_WEBHOOK_SECRET: f.config.webhook_secret };
+  const invalid: Partial<Env>[] = [
+    { STRIPE_SANDBOX_API_KEY: undefined }, { STRIPE_SANDBOX_WEBHOOK_SECRET: undefined },
+    { STRIPE_SANDBOX_API_KEY: "" }, { STRIPE_SANDBOX_API_KEY: "rk_live_wrongmode" },
+    { STRIPE_SANDBOX_WEBHOOK_SECRET: "" }, { STRIPE_SANDBOX_WEBHOOK_SECRET: "invalid" },
+    { STRIPE_SANDBOX_API_KEY: undefined, STRIPE_LIVE_API_KEY: f.config.api_key },
+    { STRIPE_SANDBOX_WEBHOOK_SECRET: undefined, STRIPE_LIVE_WEBHOOK_SECRET: f.config.webhook_secret },
+    { STRIPE_SANDBOX_CONNECTION: JSON.stringify({ ...metadata, api_key: f.config.api_key }) },
+    { STRIPE_SANDBOX_CONNECTION: JSON.stringify({ ...metadata, webhook_secret: f.config.webhook_secret }) },
+    { STRIPE_SANDBOX_CONNECTION: JSON.stringify({ ...metadata, api_key: null }) },
+  ];
+  for (const patch of invalid) {
+    const runtime = { ...separate, ...patch };
+    const response = await api("/sandbox/status", runtime);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "stripe_invalid_configuration", request_id: null });
+    const webhook = await signed(f.event("evt_InvalidSeparate"), f.config, runtime);
+    expect(webhook.status).toBe(503);
+  }
+  expect((await api("/live/status", separate)).status).toBe(503);
+  expect(f.transport).not.toHaveBeenCalled();
+});
+it("supports moving one credential at a time without changing the legacy connection", () => {
+  const f = fixture();
+  const full = JSON.parse(f.runtime.STRIPE_SANDBOX_CONNECTION!);
+  const { api_key, ...keyless } = full;
+  const { webhook_secret, ...signingless } = full;
+  expect(stripeConnection({ STRIPE_SANDBOX_CONNECTION: JSON.stringify(keyless), STRIPE_SANDBOX_API_KEY: api_key }, "sandbox"))
+    .toEqual(f.config);
+  expect(stripeConnection({ STRIPE_SANDBOX_CONNECTION: JSON.stringify(signingless), STRIPE_SANDBOX_WEBHOOK_SECRET: webhook_secret }, "sandbox"))
+    .toEqual(f.config);
+  expect(stripeConnection(f.runtime, "sandbox")).toEqual(f.config);
+});
