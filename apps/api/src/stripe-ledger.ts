@@ -148,6 +148,7 @@ export async function importStripeCash(config: StripeConnection, input: StripeIm
     return transaction(() => {
       const counts = journal.apply(config, batch);
       const result = { ...common, ...counts, invoice_id: batch.invoice_id,
+        product_id: resolution.product_id ?? null, currency: resolution.currency ?? null,
         status: batch.reason ? "no_cash" : counts.created ? "admitted" : "duplicate",
         reason: batch.reason, pending_refunds: batch.pending_refunds,
         effect_ids: batch.effects.map((effect: StripeCashEffect) => effect.resource_id),

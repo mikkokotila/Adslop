@@ -530,3 +530,32 @@ it.each(["account", "events"])("preserves known pending-refund identity when nat
   const replay = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
   expect(await replay.json()).toMatchObject({ created: 0, duplicate: 2 });
 });
+
+it.each(["account", "events"])("retains an unpaid invoice's product scope across later %s outages", async (stage) => {
+  const f = fixture("live");
+  f.invoice.status = "open"; f.invoice.amount_paid = 0;
+  const initial = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(await initial.json()).toMatchObject({ status: "no_cash", reason: "invoice_not_paid",
+    product_id: "stripe-test", currency: "EUR", created: 0 });
+  expect(await (await api("/live/events/" + f.invoice.id, f.runtime)).json()).toMatchObject({
+    latest: { status: "no_cash", product_id: "stripe-test", currency: "EUR" },
+  });
+  f.invoice.status = "paid"; f.invoice.amount_paid = 1255;
+  if (stage === "events") f.transport.mockImplementationOnce(async () => Response.json(f.nativeAccount));
+  f.transport.mockImplementationOnce(async () => Response.json({ error: "unavailable" }, { status: 503 }));
+  const paid = await signed(f.event("evt_FirstPayment" + stage), f.config, f.runtime);
+  expect(paid.status).toBe(503);
+  expect(await paid.json()).toMatchObject({ status: "retryable", invoice_id: f.invoice.id });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: null,
+    difference_minor: null, difference_micros: null, cash_status: "reconciliation_required" });
+  expect(await (await periodReport(f.runtime)).json()).toMatchObject({
+    money_in: { status: "reconciliation_required" }, observed_difference_micros: null });
+  expect(await (await api("/live/effects?product_id=stripe-test", f.runtime)).json()).toMatchObject({ effects: [] });
+  const recovered = await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(await recovered.json()).toMatchObject({ status: "admitted", created: 1, duplicate: 0 });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 1255 });
+  expect(await (await periodReport(f.runtime)).json()).toMatchObject({
+    money_in: { status: "observed_incomplete", observed_receipts_minor: "1255" } });
+  const replay = await signed(f.event("evt_FirstPaymentReplay" + stage), f.config, f.runtime);
+  expect(await replay.json()).toMatchObject({ status: "duplicate", created: 0, duplicate: 1 });
+});
