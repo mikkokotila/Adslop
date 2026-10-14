@@ -46,7 +46,8 @@ it("requires authentication and rejects unsupported methods and ambiguous period
   expect(post.status).toBe(405);
 });
 it("reports exact dated cash and native spend without double counting revisions", async () => {
-  const stub = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+  const money = (env as Env).MONEY;
+  const stub = money.get(money.idFromName("private-operator"));
   await runInDurableObject(stub, async (_instance, state) => {
     const sql = state.storage.sql;
     for (const [id, amount, day] of [["before", 900, "2026-10-04"], ["included", 1000, "2026-10-07"],
