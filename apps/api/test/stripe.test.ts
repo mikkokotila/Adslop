@@ -316,3 +316,54 @@ it("rejects malformed imports and pagination before source calls", async () => {
   expect((await api("/sandbox/import", f.runtime)).status).toBe(405);
   expect(f.transport).not.toHaveBeenCalled();
 });
+
+it("counts a renewal as a new underlying charge, not another notification of the first payment", async () => {
+  const f = fixture("live");
+  await api("/live/import", f.runtime, { invoice_id: f.invoice.id });
+  f.invoice.id = "in_Renewal"; f.paid.invoice = f.invoice.id; f.paid.id = "inpay_Renewal";
+  f.intent.id = "pi_Renewal"; f.intent.latest_charge = "ch_Renewal";
+  f.paid.payment = { type: "payment_intent", payment_intent: f.intent.id };
+  f.paid.status_transitions = { paid_at: second + 30 * 86400 };
+  f.charge.id = "ch_Renewal"; f.charge.payment_intent = f.intent.id;
+  f.line.id = "il_Renewal"; f.line.period = { start: second + 30 * 86400, end: second + 60 * 86400 };
+  expect(await (await signed(f.event("evt_Renewal"), f.config, f.runtime)).json()).toMatchObject({ created: 1 });
+  expect(await (await signed(f.event("evt_RenewalRetry"), f.config, f.runtime)).json()).toMatchObject({ duplicate: 1 });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 2510 });
+});
+it("waits for one source refresh to finish before allowing the next import", async () => {
+  const f = fixture();
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let entered: (() => void) | undefined;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const original = f.transport;
+  const network = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/account")) { entered!(); await gate; }
+    return original(url, init);
+  });
+  vi.stubGlobal("fetch", network);
+  const first = api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+  await started;
+  const concurrent = await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id });
+  expect(concurrent.status).toBe(503);
+  expect(await concurrent.json()).toMatchObject({ error: "stripe_import_busy" });
+  release!();
+  expect(await (await first).json()).toMatchObject({ created: 1 });
+  expect(await (await api("/sandbox/import", f.runtime, { invoice_id: f.invoice.id })).json()).toMatchObject({ duplicate: 1 });
+});
+it("does not trust posted event identities when Stripe returns different native evidence", async () => {
+  const f = fixture(); const posted = f.event("evt_Mismatched");
+  f.events.set("evt_Mismatched", { ...posted, type: "invoice.payment_failed" });
+  const response = await signed(posted, f.config, f.runtime);
+  expect(await response.json()).toMatchObject({ status: "quarantined", error: "stripe_event_identity_mismatch" });
+  expect(await (await api("/sandbox/effects?product_id=stripe-test", f.runtime)).json()).toMatchObject({ effects: [] });
+});
+it("rejects pagination cycles, empty continuation pages and unbounded payloads", async () => {
+  const f = fixture();
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ object: "list", has_more: true, data: [] })));
+  await expect(new StripeReader(f.config).list("/refunds")).rejects.toThrow("stripe_incomplete_page");
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ object: "list", has_more: true, data: [{ id: "re_Duplicate" }] })));
+  await expect(new StripeReader(f.config).list("/refunds")).rejects.toThrow("stripe_repeated_source_identity");
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { headers: { "Content-Length": "2000001" } })));
+  await expect(new StripeReader(f.config).get("/account")).rejects.toThrow("stripe_invalid_source");
+});
