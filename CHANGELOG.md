@@ -1,3 +1,7 @@
+# v0.12.2
+
+- Repair the moved official Arrow Parquet reference so required documentation validation can complete.
+
 # v0.12.1
 
 - Connect separate encrypted Stripe API and webhook secrets without exposing credentials or weakening sandbox isolation.

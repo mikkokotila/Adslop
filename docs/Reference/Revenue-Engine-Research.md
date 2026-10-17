@@ -168,7 +168,7 @@ This is an engineering judgment, not a benchmark result. The first reliability p
 [polars-arrow]: https://docs.pola.rs/user-guide/misc/arrow/
 [duckdb-vector]: https://duckdb.org/docs/current/internals/vector
 [duckdb-polars]: https://duckdb.org/docs/current/guides/python/polars
-[arrow-parquet]: https://arrow.apache.org/docs/python/parquet.html
+[arrow-parquet]: https://arrow.apache.org/docs/python/parquet/index.html
 [duckdb-concurrency]: https://duckdb.org/docs/current/connect/concurrency
 [polars]: https://docs.pola.rs/
 [polars-plugins]: https://docs.pola.rs/user-guide/plugins/expr_plugins/
