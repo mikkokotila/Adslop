@@ -1,3 +1,7 @@
+# v0.14.1
+
+Verify native advertising tasks and promotion eligibility for newly managed Meta Pages before preparing their first paused ad, without requiring prior promotion history.
+
 # v0.14.0
 
 Add explicit country and language configuration for paused Google Search campaigns, resolved against native constants and independently verified without changing unrelated criteria or activating delivery.

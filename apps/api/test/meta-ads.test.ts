@@ -18,7 +18,9 @@ async function api(method: string, path: string, data?: unknown, key = "operatio
 type Obj = Record<string, unknown>;
 function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreative?: boolean;
   activeParent?: boolean; wrongAccount?: boolean; adFailure?: boolean; readFailure?: boolean;
-  paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean; beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
+  paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean;
+  pageTasks?: unknown; promotionEligible?: unknown; wrongPage?: boolean;
+  beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
   let story: Obj = { page_id: page, link_data: { link: body.final_url, image_hash: hash,
@@ -55,7 +57,10 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
     }
     if (path === "act_" + account) return Response.json({ id: "act_" + account,
       account_id: account, name: "Fixture account", currency: "USD", timezone_name: "UTC" });
-    if (path.endsWith("/promote_pages")) {
+    if (path.endsWith("/promote_pages")) return Response.json({ data: [] });
+    if (path === "me/accounts") {
+      expect(params.fields).toBe("id,name,link,tasks");
+      expect(params.is_promotable).toBe("true");
       if (options.pagesDenied) return Response.json({ error: { code: 200, fbtrace_id: "page-trace" } }, { status: 403 });
       if (options.unsafeNext) return Response.json({ data: [], paging: {
         next: "https://unrelated.example.org/?access_token=never-follow", cursors: { after: "unsafe" },
@@ -64,8 +69,11 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
         next: url.origin + url.pathname + "?after=second&access_token=never-use-this", cursors: { after: "second" },
       } });
       return Response.json({ data: options.missingPage ? [] : [{ id: page, name: "Fixture page",
+        tasks: Object.hasOwn(options, "pageTasks") ? options.pageTasks : ["ADVERTISE", "MANAGE"],
         link: "https://www.facebook.com/" + page, access_token: "never-return-page-token" }] });
     }
+    if (path === page) return Response.json({ id: options.wrongPage ? "999" : page,
+      promotion_eligible: Object.hasOwn(options, "promotionEligible") ? options.promotionEligible : true });
     if (path.endsWith("/adimages")) return Response.json({ data: options.missingImage ? [] : [{ hash,
       name: "Image fixture", width: 1200, height: 628, url: "https://example.org/image.png" }] });
     if (path.endsWith("/campaigns")) return Response.json({ data: [{ id: campaign, account_id: account,
@@ -138,6 +146,40 @@ it("creates a paused ad only after verifying its Page image and paused parents",
   expect(await readback.json()).toMatchObject({ status: "verified_paused", native: {
     campaign_id: campaign, adset_id: adset, ad_id: ad, creative: { final_url: body.final_url, page_id: page, image_hash: hash },
   } });
+});
+it("accepts a newly managed Page without promotion history", async () => {
+  const native = mock({ paged: true, pageTasks: ["ADVERTISE"] });
+  const inventory = await api("GET", "/creative-assets");
+  expect(await inventory.json()).toMatchObject({ pages: {
+    status: "available", rows: [{ id: page, tasks: ["ADVERTISE"] }],
+  } });
+  const result = await api("POST", "/paused-ads", body);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({ status: "verified_paused", ad_id: ad });
+  expect(native.calls.some(v => v.path.endsWith("/promote_pages"))).toBe(false);
+  expect(native.calls).toContainEqual({ path: page, method: "GET", params: { fields: "id,promotion_eligible" } });
+  expect(native.mutations).toEqual(["act_" + account + "/adcreatives", "act_" + account + "/ads"]);
+});
+it("rejects missing Page advertising authority before native writes", async () => {
+  for (const [i, tasks] of [["ANALYZE"], [], undefined, null, [1]].entries()) {
+    const native = mock({ pageTasks: tasks });
+    const result = await api("POST", "/paused-ads", body, "page-authority-" + i);
+    expect(result.status).toBe(i < 2 ? 403 : 502);
+    expect(await result.json()).toMatchObject({ error: i < 2 ? "meta_page_not_authorized_for_account" : "meta_invalid_native_response" });
+    expect(native.mutations).toHaveLength(0);
+  }
+});
+it("rejects false or unknown Page promotion eligibility before native writes", async () => {
+  for (const [i, eligible] of [false, undefined, null, "true"].entries()) {
+    const native = mock({ promotionEligible: eligible });
+    const result = await api("POST", "/paused-ads", body, "page-eligibility-" + i);
+    expect(result.status).toBe(i === 0 ? 409 : 502);
+    expect(await result.json()).toMatchObject({ error: i === 0 ? "meta_page_not_promotion_eligible" : "meta_page_promotion_eligibility_unavailable" });
+    expect(native.mutations).toHaveLength(0);
+  }
+  const native = mock({ wrongPage: true });
+  expect((await api("POST", "/paused-ads", body, "wrong-page-identity")).status).toBe(409);
+  expect(native.mutations).toHaveLength(0);
 });
 it("rejects unsafe inputs before contacting Meta", async () => {
   const native = mock();
@@ -227,7 +269,7 @@ it("rejects an off-origin paging destination without sending credentials there",
   const result = await api("GET", "/creative-assets");
   expect(await result.json()).toMatchObject({ complete: false, pages: {
     status: "unavailable", error: "meta_invalid_asset_page" } });
-  expect(native.calls.filter(v => v.path.endsWith("/promote_pages"))).toHaveLength(1);
+  expect(native.calls.filter(v => v.path === "me/accounts")).toHaveLength(1);
 });
 it("serializes duplicate requests while a native write is pending", async () => {
   let release!: () => void, entered!: () => void;
