@@ -663,7 +663,8 @@ export default {
         const result = await ledger.stripeImport(config, input);
         return reply(JSON.parse(result.body), result.status);
       } catch (error) {
-        if (error instanceof StripeError) return reply({ error: error.code, request_id: error.request_id }, error.status);
+        if (error instanceof StripeError) return reply({ error: error.code, request_id: error.request_id,
+          ...(error.configuration_issue ? { configuration_issue: error.configuration_issue } : {}) }, error.status);
         throw error;
       }
     }

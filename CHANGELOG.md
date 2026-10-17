@@ -1,3 +1,7 @@
+# v0.12.2
+
+- Identify rejected Stripe configuration fields without exposing credentials or changing accounting validation.
+
 # v0.12.1
 
 - Connect separate encrypted Stripe API and webhook secrets without exposing credentials or weakening sandbox isolation.
