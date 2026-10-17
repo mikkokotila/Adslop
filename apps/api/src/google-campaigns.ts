@@ -6,16 +6,18 @@ import { GoogleAdsClient, GoogleAdsError, type GoogleAdsConfig } from './google'
 
 type MatchType = 'EXACT' | 'PHRASE' | 'BROAD';
 interface Keyword { text: string; match_type: MatchType }
-interface CreateSearch {
+type SearchBudget =
+  | { daily_budget_micros: string; total_budget_micros?: never; start_date_time?: never; end_date_time?: never }
+  | { daily_budget_micros?: never; total_budget_micros: string; start_date_time: string; end_date_time: string };
+type CreateSearch = SearchBudget & {
   contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING';
   name: string;
-  daily_budget_micros: string;
   cpc_bid_micros: string;
   keywords: Keyword[];
   headlines: string[];
   descriptions: string[];
   final_url: string;
-}
+};
 interface UpdateSearch { name?: string; daily_budget_micros?: string }
 type Native = Record<string, unknown>;
 
@@ -77,12 +79,41 @@ function name(value: unknown, limit: number): string {
   return value;
 }
 
+function isPositiveMicros(value: unknown): value is string {
+  return typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value) &&
+    BigInt(value) <= 9223372036854775807n;
+}
+
 function positiveMicros(value: unknown): string {
-  if (typeof value !== 'string' || !/^[1-9]\d{0,18}$/.test(value) ||
-      BigInt(value) > 9223372036854775807n) {
+  if (!isPositiveMicros(value)) {
     throw new CampaignError('google_ads_invalid_money_micros', 400);
   }
   return value;
+}
+
+function dateTime(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ||
+      value.startsWith('0000-')) return false;
+  // UTC is used only to validate calendar components, not to interpret the account-local schedule.
+  const parsed = new Date(value.replace(' ', 'T') + 'Z');
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 19).replace('T', ' ') === value;
+}
+
+function parseBudget(v: Native): SearchBudget {
+  if (Object.hasOwn(v, 'daily_budget_micros') === Object.hasOwn(v, 'total_budget_micros')) {
+    throw new CampaignError('google_ads_invalid_budget_configuration', 400);
+  }
+  if (Object.hasOwn(v, 'daily_budget_micros')) {
+    if (Object.hasOwn(v, 'start_date_time') || Object.hasOwn(v, 'end_date_time')) {
+      throw new CampaignError('google_ads_invalid_budget_configuration', 400);
+    }
+    return { daily_budget_micros: positiveMicros(v.daily_budget_micros) };
+  }
+  if (!dateTime(v.start_date_time) || !dateTime(v.end_date_time) || v.end_date_time <= v.start_date_time) {
+    throw new CampaignError('google_ads_invalid_campaign_schedule', 400);
+  }
+  return { total_budget_micros: positiveMicros(v.total_budget_micros),
+    start_date_time: v.start_date_time, end_date_time: v.end_date_time };
 }
 
 function uniqueTexts(value: unknown, minimum: number, maximum: number, length: number): string[] {
@@ -98,7 +129,7 @@ function uniqueTexts(value: unknown, minimum: number, maximum: number, length: n
 
 function parseCreate(value: unknown): CreateSearch {
   const v = input(value, [
-    'name', 'daily_budget_micros', 'cpc_bid_micros',
+    'name', 'daily_budget_micros', 'total_budget_micros', 'start_date_time', 'end_date_time', 'cpc_bid_micros',
     'keywords', 'headlines', 'descriptions', 'final_url',
     'contains_eu_political_advertising',
   ]);
@@ -133,7 +164,7 @@ function parseCreate(value: unknown): CreateSearch {
   return {
     contains_eu_political_advertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
     name: name(v.name, 128),
-    daily_budget_micros: positiveMicros(v.daily_budget_micros),
+    ...parseBudget(v),
     cpc_bid_micros: positiveMicros(v.cpc_bid_micros),
     keywords,
     headlines: uniqueTexts(v.headlines, 3, 15, 30),
@@ -232,12 +263,27 @@ interface Snapshot {
   ads: Native[];
 }
 
+function validateBudget(campaign: Native, budget: Native): void {
+  const total = budget.period === 'CUSTOM_PERIOD';
+  const unused = total ? budget.amountMicros : budget.totalAmountMicros;
+  if ((!total && budget.period !== 'DAILY') || budget.resourceName !== campaign.campaignBudget ||
+      typeof budget.explicitlyShared !== 'boolean' ||
+      !isPositiveMicros(total ? budget.totalAmountMicros : budget.amountMicros) ||
+      (unused !== undefined && unused !== '0') || !dateTime(campaign.startDateTime) ||
+      (campaign.endDateTime !== undefined &&
+       (!dateTime(campaign.endDateTime) || campaign.endDateTime <= campaign.startDateTime)) ||
+      (total && (budget.explicitlyShared || campaign.endDateTime === undefined))) {
+    throw new CampaignError('google_ads_invalid_native_budget', 502);
+  }
+}
+
 /** Fetches independent GAQL source records, never reuses a mutate echo as evidence. */
 async function snapshot(client: GoogleAdsClient, customer: string, campaignId: string): Promise<Snapshot> {
   const number = campaignId;
   const campaigns = await client.search(customer,
     'SELECT campaign.id, campaign.name, campaign.status, ' +
     'campaign.advertising_channel_type, campaign.campaign_budget, ' +
+    'campaign.start_date_time, campaign.end_date_time, ' +
     'campaign.bidding_strategy_type, campaign.contains_eu_political_advertising, ' +
     'campaign.network_settings.target_google_search, ' +
     'campaign.network_settings.target_search_network, ' +
@@ -245,14 +291,14 @@ async function snapshot(client: GoogleAdsClient, customer: string, campaignId: s
     'WHERE campaign.id = ' + number);
   const campaign = one(campaigns, 'campaign');
   const budgetName = field(campaign.campaignBudget);
-  if (!budgetName.startsWith('customers/' + customer + '/campaignBudgets/')) {
-    throw new CampaignError('google_ads_native_budget_mismatch', 502);
-  }
+  googleResource(customer, 'campaignBudgets', budgetName);
   const budgets = await client.search(customer,
     'SELECT campaign_budget.resource_name, campaign_budget.amount_micros, ' +
+    'campaign_budget.period, campaign_budget.total_amount_micros, ' +
     'campaign_budget.explicitly_shared FROM campaign_budget ' +
     "WHERE campaign_budget.resource_name = '" + budgetName + "'");
   const budget = one(budgets, 'campaignBudget');
+  validateBudget(campaign, budget);
   const groups = (await client.search(customer,
     'SELECT campaign.id, ad_group.id, ad_group.name, ad_group.type, ' +
     'ad_group.status, ad_group.cpc_bid_micros FROM ad_group ' +
@@ -302,8 +348,12 @@ function verifyCreate(
     settings.targetGoogleSearch !== true,
     settings.targetSearchNetwork === true,
     settings.targetContentNetwork === true,
-    s.budget.amountMicros !== expected.daily_budget_micros,
-    s.budget.explicitlyShared === true,
+    s.budget.period !== (expected.total_budget_micros !== undefined ? 'CUSTOM_PERIOD' : 'DAILY'),
+    expected.total_budget_micros !== undefined
+      ? s.budget.totalAmountMicros !== expected.total_budget_micros ||
+        s.campaign.startDateTime !== expected.start_date_time || s.campaign.endDateTime !== expected.end_date_time
+      : s.budget.amountMicros !== expected.daily_budget_micros,
+    s.budget.explicitlyShared !== false,
   ];
   const group = s.groups.find((g) => g.id === groupId);
   failures.push(!group || group.name !== expected.name + ' Keywords' ||
@@ -345,11 +395,16 @@ async function create(
   const operations: Native[] = [
     { campaignBudgetOperation: { create: {
       resourceName: budget, name: config.name + ' Budget',
-      amountMicros: config.daily_budget_micros, explicitlyShared: false,
+      ...(config.total_budget_micros !== undefined
+        ? { period: 'CUSTOM_PERIOD', totalAmountMicros: config.total_budget_micros }
+        : { period: 'DAILY', amountMicros: config.daily_budget_micros }),
+      explicitlyShared: false,
     } } },
     { campaignOperation: { create: {
       resourceName: campaign, name: config.name, status: 'PAUSED',
       advertisingChannelType: 'SEARCH', campaignBudget: budget,
+      ...(config.total_budget_micros !== undefined
+        ? { startDateTime: config.start_date_time, endDateTime: config.end_date_time } : {}),
       containsEuPoliticalAdvertising: config.contains_eu_political_advertising,
       manualCpc: { enhancedCpcEnabled: false },
       networkSettings: { targetGoogleSearch: true, targetSearchNetwork: false,
@@ -414,6 +469,9 @@ async function update(
   const existing = await snapshot(client, customer, campaignId);
   ensurePaused(existing);
   const budgetName = field(existing.campaign.campaignBudget);
+  if (config.daily_budget_micros !== undefined && existing.budget.period !== 'DAILY') {
+    throw new CampaignError('google_ads_total_budget_daily_update_denied', 409);
+  }
   if (config.daily_budget_micros !== undefined &&
       existing.budget.explicitlyShared === true) {
     throw new CampaignError('google_ads_shared_budget_update_denied', 409);
@@ -455,9 +513,13 @@ async function update(
     }
     const actual = await snapshot(client, customer, campaignId);
     ensurePaused(actual);
+    const amount = existing.budget.period === 'DAILY' ? 'amountMicros' : 'totalAmountMicros';
     if ((config.name !== undefined && actual.campaign.name !== config.name) ||
-        (config.daily_budget_micros !== undefined &&
-         actual.budget.amountMicros !== config.daily_budget_micros)) {
+        actual.campaign.campaignBudget !== budgetName || actual.budget.period !== existing.budget.period ||
+        actual.budget.explicitlyShared !== existing.budget.explicitlyShared ||
+        actual.budget[amount] !== (config.daily_budget_micros ?? existing.budget[amount]) ||
+        actual.campaign.startDateTime !== existing.campaign.startDateTime ||
+        actual.campaign.endDateTime !== existing.campaign.endDateTime) {
       throw new CampaignError('google_ads_write_readback_mismatch', 409);
     }
     return { status: 'verified_paused', ...identity,

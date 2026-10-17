@@ -1,3 +1,7 @@
+# v0.16.0
+
+Add an explicit Google Search total-budget alternative with a required account-local start and end schedule. Create every resource paused, independently verify the exact native total and dates, reject daily updates to total budgets, and preserve cap and schedule through name-only changes. Retain acknowledged IDs on failed verification and grant no paid activation authority.
+
 # v0.15.0
 
 Expose native Meta account status, disable reason and capabilities in existing asset reads, and native ad issue/review feedback in paused-ad reads. Preserve omitted evidence as unknown, reject malformed provider shapes and retain acknowledged identities when post-write verification fails. Keep payment details private and paid delivery unauthorized.
