@@ -310,10 +310,12 @@ it('preserves total budgets through paused reads and name updates', async () => 
   expect((await call('POST', '/paused-search-campaigns', totalConfig)).status).toBe(201);
   const before = await call('GET', '/paused-search-campaigns/610');
   expect(before.status).toBe(200);
-  const original = await before.json();
+  const original = await before.json() as { native: {
+    budget: Record<string, unknown>; campaign: Record<string, unknown>;
+  } };
   const updated = await call('PATCH', '/paused-search-campaigns/610', { name: 'New paused total name' });
   expect(updated.status).toBe(200);
-  const value = await updated.json();
+  const value = await updated.json() as typeof original;
   expect(value.native.budget).toEqual(original.native.budget);
   expect(value.native.campaign).toEqual({ ...original.native.campaign, name: 'New paused total name' });
   expect(value).toMatchObject({ paid_delivery_authorized: false, native: { budget: {
