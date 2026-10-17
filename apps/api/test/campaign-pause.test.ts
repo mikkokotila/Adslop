@@ -17,7 +17,7 @@ async function call(provider: CampaignPauseProvider, method = "POST", body = "{}
     ...(method === "GET" ? {} : { body }),
   }), { ...env, ...credentials } as Env);
 }
-type Options = { paused?: boolean; foreign?: boolean; accountMismatch?: boolean;
+type Options = { paused?: boolean; foreign?: boolean; accountMismatch?: boolean; child?: "ad" | "adset";
   failure?: "network" | "invalid_json" | "server" | "denied" | "readback" | "mismatch" };
 function nativeMock(provider: CampaignPauseProvider, options: Options = {}) {
   let status = options.paused ? "PAUSED" : provider === "google-ads" ? "ENABLED" : "ACTIVE";
@@ -60,7 +60,10 @@ function nativeMock(provider: CampaignPauseProvider, options: Options = {}) {
       { headers: { "request-id": "native-observation" } });
     }
     expect(url).toContain("https://graph.facebook.com/v25.0/" + campaign + "?");
-    return Response.json({ id: campaign, account_id: options.foreign ? "9876543210" : account, status });
+    expect(new URL(url).searchParams.get("fields")).toBe("id,account_id,status,objective,buying_type");
+    return Response.json({ id: campaign, account_id: options.foreign ? "9876543210" : account, status,
+      ...(options.child ? { campaign_id: "999", ...(options.child === "ad" ? { adset_id: "888" } : {}) }
+        : { objective: "OUTCOME_TRAFFIC", buying_type: "AUCTION" }) });
   });
   vi.stubGlobal("fetch", fake);
   return { writes: () => writes, fake };
@@ -166,4 +169,16 @@ it("rejects activation and foreign account requests", async () => {
   const wrongAccount = nativeMock("google-ads", { accountMismatch: true });
   expect((await call("google-ads")).status).toBe(409);
   expect(wrongAccount.writes()).toBe(0);
+  for (const child of ["ad", "adset"] as const) {
+    const native = nativeMock("meta", { paused: true, child });
+    const reply = await call("meta");
+    expect(reply.status).toBe(409);
+    expect(await reply.json()).toMatchObject({ status: "failed_before_write", error: "campaign_pause_campaign_identity_unverified" });
+    expect(native.writes()).toBe(0);
+    expect(await (await call("meta", "GET")).json()).toMatchObject({ attempts: expect.arrayContaining([
+      expect.objectContaining({ status: "failed_before_write", checkpoints: expect.arrayContaining([
+        expect.objectContaining({ error: "campaign_pause_campaign_identity_unverified" }),
+      ]) }),
+    ]) });
+  }
 });

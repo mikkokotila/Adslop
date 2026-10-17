@@ -5,7 +5,8 @@ import type { Env } from "./index";
 
 export type CampaignPauseProvider = "google-ads" | "meta";
 type Obj = Record<string, unknown>;
-type Native = { account_id: string; campaign_id: string; status: string; observed_at: string };
+type Native = { account_id: string; campaign_id: string; entity_type: "campaign"; status: string;
+  observed_at: string; objective?: string; buying_type?: string };
 type Checkpoint = { phase: string; at: string } & Obj;
 type Attempt = {
   operation_id: string; provider: CampaignPauseProvider; account_id: string;
@@ -34,7 +35,7 @@ function observed(account: string, campaign: string, status: unknown, allowed: s
   if (typeof status !== "string" || !allowed.includes(status)) {
     throw new PauseError("campaign_pause_unsupported_native_status", 409);
   }
-  return { account_id: account, campaign_id: campaign, status, observed_at: new Date().toISOString() };
+  return { account_id: account, campaign_id: campaign, entity_type: "campaign", status, observed_at: new Date().toISOString() };
 }
 async function nativeAdapter(provider: CampaignPauseProvider, account: string, campaign: string, env: Env) {
   if (provider === "google-ads") {
@@ -74,11 +75,17 @@ async function nativeAdapter(provider: CampaignPauseProvider, account: string, c
   return {
     requestId: (): string | null => null,
     read: async (): Promise<Native> => {
-      const native = await metaGraph("GET", campaign, token, { fields: "id,account_id,status" });
+      const native = await metaGraph("GET", campaign, token, { fields: "id,account_id,status,objective,buying_type" });
       if (native.id !== campaign || native.account_id !== account) {
         throw new PauseError("campaign_pause_account_mismatch", 409);
       }
-      return observed(account, campaign, native.status, ["ACTIVE", "PAUSED"]);
+      // Child ads/ad sets also expose id/account_id/status. Require campaign-only fields.
+      if (typeof native.objective !== "string" || !/^[A-Z_]{2,64}$/.test(native.objective) ||
+          typeof native.buying_type !== "string" || !/^[A-Z_]{2,64}$/.test(native.buying_type)) {
+        throw new PauseError("campaign_pause_campaign_identity_unverified", 409);
+      }
+      return { ...observed(account, campaign, native.status, ["ACTIVE", "PAUSED"]),
+        objective: native.objective, buying_type: native.buying_type };
     },
     write: async () => {
       const reply = await metaGraph("POST", campaign, token, { status: "PAUSED" });
