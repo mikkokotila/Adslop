@@ -144,7 +144,7 @@ export async function handleGoogleTargeting(request: Request, url: URL, env: Goo
   if (!route) return reply({ error: "google_ads_targeting_not_found" }, 404);
   if (url.search) return reply({ error: "google_ads_targeting_invalid_query" }, 400);
   if (!["GET", "PUT"].includes(request.method)) return reply({ error: "google_ads_targeting_method_not_allowed" }, 405);
-  let writeRequested = false;
+  let writeRequested = false, acknowledged = false;
   try {
     let wanted: Selection | undefined;
     if (request.method === "PUT") {
@@ -178,6 +178,7 @@ export async function handleGoogleTargeting(request: Request, url: URL, env: Goo
       writeRequested = true;
       const acknowledgment = object(await client.request("/customers/" + ctx.account + "/googleAds:mutate",
         { partialFailure: false, mutateOperations: operations }, ctx.login));
+      acknowledged = true;
       if (acknowledgment.partialFailureError !== undefined || !Array.isArray(acknowledgment.mutateOperationResponses) ||
           acknowledgment.mutateOperationResponses.length !== operations.length ||
           object(object(acknowledgment.mutateOperationResponses[0]).campaignResult).resourceName !== resource(ctx)) {
@@ -193,9 +194,12 @@ export async function handleGoogleTargeting(request: Request, url: URL, env: Goo
   } catch (error) {
     const known = error instanceof TargetingError || error instanceof GoogleAdsError;
     const requestId = error instanceof GoogleAdsError ? error.requestId : null;
+    const nativeStatus = error instanceof GoogleAdsError ? error.responseStatus : null;
+    const rejected = writeRequested && !acknowledged && nativeStatus !== null && nativeStatus >= 400 && nativeStatus < 500;
     return reply({ error: known ? error.code : "google_ads_targeting_execution_interrupted", campaign_id: route[2],
       request_id: requestId && /^[A-Za-z0-9_-]{1,128}$/.test(requestId) ? requestId : null,
-      ...(writeRequested ? { status: "write_unverified", native_write_requested: true } : {}),
+      native_http_status: nativeStatus,
+      ...(writeRequested ? { status: rejected ? "write_rejected" : "write_unverified", native_write_requested: true } : {}),
       paid_delivery_authorized: false, launch_ready: false }, known ? error.status : 502);
   }
 }

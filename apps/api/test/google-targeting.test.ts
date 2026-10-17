@@ -13,7 +13,7 @@ type Criterion = { resourceName: string; criterionId: string; type: string; stat
 type Operation = { campaignOperation?: { update: { resourceName: string; status: string; geoTargetTypeSetting: { positiveGeoTargetType: string } }; updateMask: string };
   campaignCriterionOperation?: { remove?: string; create?: { campaign: string; location?: { geoTargetConstant: string }; language?: { languageConstant: string } } } };
 type Options = { active?: boolean; foreign?: boolean; wrongAccount?: boolean; unsupported?: boolean;
-  failure?: "network" | "invalid_ack" | "readback" | "mismatch" | "unrelated_changed" };
+  failure?: "network" | "invalid_ack" | "readback" | "readback_denied" | "mismatch" | "unrelated_changed" | "denied" | "rejected400" | "throttled" };
 function nativeMock(options: Options = {}) {
   const geo = { positiveGeoTargetType: "PRESENCE_OR_INTEREST", negativeGeoTargetType: "PRESENCE" };
   let criteria: Criterion[] = [
@@ -46,6 +46,9 @@ function nativeMock(options: Options = {}) {
       expect(ops[0]).toEqual({ campaignOperation: { update: { resourceName: resource, status: "PAUSED",
         geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE" } }, updateMask: "status,geo_target_type_setting.positive_geo_target_type" } });
       mutations.push(ops);
+      if (["denied", "rejected400", "throttled"].includes(options.failure ?? "")) {
+        return Response.json({ error: "REJECTED" }, { status: options.failure === "denied" ? 403 : options.failure === "throttled" ? 429 : 400 });
+      }
       geo.positiveGeoTargetType = options.failure === "mismatch" ? "PRESENCE_OR_INTEREST" : "PRESENCE";
       const results: object[] = [{ campaignResult: { resourceName: resource } }];
       for (const operation of ops.slice(1)) {
@@ -71,6 +74,7 @@ function nativeMock(options: Options = {}) {
       return Response.json(options.failure === "invalid_ack" ? {} : { mutateOperationResponses: results });
     }
     if (mutations.length && options.failure === "readback") return Response.json({ error: "UNAVAILABLE" }, { status: 503 });
+    if (mutations.length && options.failure === "readback_denied") return Response.json({ error: "DENIED" }, { status: 403 });
     if (query.includes("FROM campaign WHERE")) return Response.json({ results: [{ campaign: { id: campaign,
       resourceName: options.foreign ? resource.replace(account, "9876543210") : resource,
       status: options.active ? "ENABLED" : "PAUSED", advertisingChannelType: "SEARCH", geoTargetTypeSetting: geo } }] });
@@ -150,11 +154,20 @@ it("refuses unsafe or unverifiable targeting writes", async () => {
     expect((await call("PUT", desired)).status).toBe(409);
     expect(native.mutations).toHaveLength(0);
   }
-  for (const failure of ["network", "invalid_ack", "readback", "mismatch", "unrelated_changed"] as const) {
+  for (const failure of ["network", "invalid_ack", "readback", "readback_denied", "mismatch", "unrelated_changed"] as const) {
     const native = nativeMock({ failure });
     const reply = await call("PUT", desired);
     expect(reply.status).toBeGreaterThanOrEqual(400);
     expect(await reply.json()).toMatchObject({ status: "write_unverified", launch_ready: false, paid_delivery_authorized: false });
+    expect(native.mutations).toHaveLength(1);
+  }
+  for (const [failure, status] of [["denied", 403], ["rejected400", 400], ["throttled", 429]] as const) {
+    const native = nativeMock({ failure });
+    const reply = await call("PUT", desired);
+    expect(reply.status).toBeGreaterThanOrEqual(400);
+    expect(await reply.json()).toMatchObject({ status: "write_rejected", native_http_status: status,
+      native_write_requested: true, launch_ready: false, paid_delivery_authorized: false });
+    expect(native.criteria().filter(c => !c.negative && c.type !== "DEVICE")).toHaveLength(0);
     expect(native.mutations).toHaveLength(1);
   }
 });
