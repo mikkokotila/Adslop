@@ -20,13 +20,15 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
   activeParent?: boolean; wrongAccount?: boolean; adFailure?: boolean; readFailure?: boolean;
   paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean;
   pageTasks?: unknown; promotionEligible?: unknown; wrongPage?: boolean;
+  creativeName?: string; creativeAccount?: string; creativeIdentity?: string; creativeStory?: Obj;
+  assetFeed?: Obj; adName?: string; activeAfterCreativeRead?: boolean;
   beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
   let story: Obj = { page_id: page, link_data: { link: body.final_url, image_hash: hash,
     message: body.primary_text, name: body.headline, description: body.description,
     call_to_action: { type: "LEARN_MORE", value: { link: body.final_url } } } };
-  let creativeName = body.name;
+  let creativeName = options.creativeName ?? body.name, creativeRead = false;
   const fake = vi.fn(async (resource: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(resource)), path = url.pathname.replace("/v25.0/", "");
     const method = init?.method ?? "GET";
@@ -44,13 +46,14 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
       if (path.endsWith("/adimages")) return Response.json({ images: { uploaded: { hash } } });
       if (path.endsWith("/adcreatives")) {
         if (options.beforeCreative) await options.beforeCreative();
-        story = JSON.parse(params.object_story_spec) as Obj; creativeName = params.name;
+        story = JSON.parse(params.object_story_spec) as Obj; creativeName = options.creativeName ?? params.name;
         return Response.json({ id: creative });
       }
       if (path.endsWith("/ads")) {
         if (options.beforeAd) await options.beforeAd();
         expect(params.status).toBe("PAUSED");
         expect(params.adset_id).toBe(adset);
+        expect(JSON.parse(params.creative)).toEqual({ creative_id: creative });
         if (options.adFailure) return Response.json({ error: "upstream" }, { status: 503 });
         return Response.json({ id: ad });
       }
@@ -86,18 +89,23 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
       { permission: "ads_read", status: "granted" }, { permission: "ads_management", status: "granted" },
     ] });
     if (path === campaign) return Response.json({ id: campaign, name: "Fixture campaign",
-      account_id: options.wrongAccount ? "999" : account, status: options.activeParent ? "ACTIVE" : "PAUSED",
+      account_id: options.wrongAccount ? "999" : account,
+      status: options.activeParent || (options.activeAfterCreativeRead && creativeRead) ? "ACTIVE" : "PAUSED",
       objective: "OUTCOME_TRAFFIC", special_ad_categories: [] });
     if (path === adset) return Response.json({ id: adset, account_id: account, campaign_id: campaign,
       status: "PAUSED", daily_budget: "500", optimization_goal: "LINK_CLICKS", billing_event: "IMPRESSIONS",
       targeting: { geo_locations: { countries: ["US"] }, interests: [{ id: "7001" }] } });
-    if (path === creative) return Response.json({ id: creative, account_id: account, name: creativeName,
-      object_story_spec: options.badCreative ? { ...story,
-        link_data: { ...(story.link_data as Obj), link: "https://wrong.example.org/" } } : story });
+    if (path === creative) {
+      creativeRead = true;
+      return Response.json({ id: options.creativeIdentity ?? creative, account_id: options.creativeAccount ?? account,
+        name: creativeName, object_story_spec: options.creativeStory ?? (options.badCreative ? { ...story,
+          link_data: { ...(story.link_data as Obj), link: "https://wrong.example.org/" } } : story),
+        ...(params.fields.split(",").includes("asset_feed_spec") ? { asset_feed_spec: options.assetFeed } : {}) });
+    }
     if (path === ad) {
       if (options.readFailure) return Response.json({ error: { code: 200, fbtrace_id: "trace-read" } }, { status: 403 });
       return Response.json({ id: ad, account_id: account, campaign_id: campaign, adset_id: adset,
-        name: body.name, status: "PAUSED", effective_status: "CAMPAIGN_PAUSED", creative: { id: creative } });
+        name: options.adName ?? body.name, status: "PAUSED", effective_status: "CAMPAIGN_PAUSED", creative: { id: creative } });
     }
     throw Error("Unexpected fixture path " + path);
   });
@@ -160,6 +168,84 @@ it("accepts a newly managed Page without promotion history", async () => {
   expect(native.calls).toContainEqual({ path: page, method: "GET", params: { fields: "id,promotion_eligible" } });
   expect(native.mutations).toEqual(["act_" + account + "/adcreatives", "act_" + account + "/ads"]);
 });
+it("accepts provider-assigned creative metadata names", async () => {
+  const nativeName = body.name + " 2026-10-17-provider-label";
+  const native = mock({ creativeName: nativeName });
+  const result = await api("POST", "/paused-ads", body);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({ configuration_match: true, native: {
+    ad: { name: body.name }, creative: { name: nativeName, primary_text: body.primary_text, final_url: body.final_url },
+  } });
+  expect(native.mutations).toEqual(["act_" + account + "/adcreatives", "act_" + account + "/ads"]);
+});
+it("reuses a verified acknowledged creative without creating another", async () => {
+  const native = mock({ creativeName: "Provider library name" });
+  const recovery = { ...body, creative_id: creative };
+  const first = await api("POST", "/paused-ads", recovery);
+  expect(first.status).toBe(201);
+  const value = await first.json();
+  expect(value).toMatchObject({ status: "verified_paused", creative_id: creative, ad_id: ad,
+    configuration_match: true, paid_delivery_authorized: false, native: {
+      ad: { name: body.name }, creative: { id: creative, name: "Provider library name" },
+    } });
+  expect(native.mutations).toEqual(["act_" + account + "/ads"]);
+  expect(native.calls.findIndex(v => v.path === creative)).toBeLessThan(native.calls.findIndex(v => v.method === "POST"));
+  await evictAllDurableObjects();
+  expect(await (await api("POST", "/paused-ads", recovery)).json()).toEqual(value);
+  expect(await (await api("POST", "/paused-ads", { ...recovery, creative_id: "402" })).json())
+    .toMatchObject({ error: "meta_idempotency_conflict" });
+  expect(native.mutations).toHaveLength(1);
+});
+it("rejects mismatched recovery creatives before ad creation", async () => {
+  const link = { link: body.final_url, image_hash: hash, message: body.primary_text, name: body.headline,
+    description: body.description, call_to_action: { type: "LEARN_MORE", value: { link: body.final_url } } };
+  const changes = [
+    { creativeIdentity: "999" }, { creativeAccount: "999" },
+    { creativeStory: { page_id: "999", link_data: link } },
+    ...Object.entries({ link: "https://wrong.example.org/", image_hash: "b".repeat(32), message: "Different copy",
+      name: "Different headline", description: "Different description",
+      call_to_action: { type: "SHOP_NOW", value: { link: body.final_url } } })
+      .map(([key, value]) => ({ creativeStory: { page_id: page, link_data: { ...link, [key]: value } } })),
+    { creativeStory: { page_id: page, link_data: { ...link,
+      call_to_action: { type: "LEARN_MORE", value: { link: "https://wrong.example.org/" } } } } },
+    { assetFeed: { bodies: [{ text: "Alternate content" }] } },
+  ];
+  for (const [i, change] of changes.entries()) {
+    const native = mock(change);
+    const result = await api("POST", "/paused-ads", { ...body, creative_id: creative }, "recovery-mismatch-" + i);
+    expect(result.status).toBe(409);
+    const value = await result.json();
+    expect(value).not.toHaveProperty("status");
+    expect(value).not.toHaveProperty("creative_id");
+    expect(native.mutations).toHaveLength(0);
+  }
+});
+it("rechecks paused parents after validating a reused creative", async () => {
+  const native = mock({ activeAfterCreativeRead: true });
+  const result = await api("POST", "/paused-ads", { ...body, creative_id: creative });
+  expect(result.status).toBe(409);
+  expect(await result.json()).toMatchObject({ creative_id: creative, paid_delivery_authorized: false });
+  expect(native.mutations).toHaveLength(0);
+});
+it("keeps exact ad-name verification when creative metadata names differ", async () => {
+  const native = mock({ creativeName: "Provider library name", adName: "Unexpected ad name" });
+  const result = await api("POST", "/paused-ads", { ...body, creative_id: creative });
+  expect(result.status).toBe(409);
+  expect(await result.json()).toMatchObject({ error: "meta_ad_readback_mismatch", status: "write_unverified",
+    creative_id: creative, ad_id: ad });
+  expect(native.mutations).toEqual(["act_" + account + "/ads"]);
+});
+it.each(["adFailure", "readFailure"] as const)("does not repeat a recovery ad write after %s", async flag => {
+  const native = mock({ [flag]: true });
+  const recovery = { ...body, creative_id: creative };
+  const first = await api("POST", "/paused-ads", recovery);
+  expect(first.status).toBe(flag === "adFailure" ? 502 : 403);
+  const value = await first.json();
+  expect(value).toMatchObject({ status: "write_unverified", creative_id: creative });
+  await evictAllDurableObjects();
+  expect(await (await api("POST", "/paused-ads", recovery)).json()).toEqual(value);
+  expect(native.mutations).toEqual(["act_" + account + "/ads"]);
+});
 it("rejects missing Page advertising authority before native writes", async () => {
   for (const [i, tasks] of [["ANALYZE"], [], undefined, null, [1]].entries()) {
     const native = mock({ pageTasks: tasks });
@@ -187,6 +273,7 @@ it("rejects unsafe inputs before contacting Meta", async () => {
     { ...body, page_id: "untrusted" }, { ...body, final_url: "https://name:password@example.org/" },
     { ...body, parent_expectation: { ...body.parent_expectation, countries: ["US", "US"] } },
     { ...body, parent_expectation: { ...body.parent_expectation, daily_budget_minor: 500 } },
+    ...[null, 401, "", "0401", "401?fields=id", "1".repeat(33)].map(creative_id => ({ ...body, creative_id })),
   ];
   for (const [i, payload] of invalid.entries()) expect((await api("POST", "/paused-ads", payload, "bad" + i)).status).toBe(400);
   expect(native.fake).not.toHaveBeenCalled();

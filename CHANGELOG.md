@@ -1,3 +1,7 @@
+# v0.14.2
+
+Verify Meta creative content independently of provider-assigned library names, and recover paused-ad preparation by explicitly reusing an acknowledged, independently verified creative without creating a duplicate.
+
 # v0.14.1
 
 Verify native advertising tasks and promotion eligibility for newly managed Meta Pages before preparing their first paused ad, without requiring prior promotion history.

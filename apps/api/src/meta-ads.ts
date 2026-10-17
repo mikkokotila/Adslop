@@ -134,11 +134,14 @@ async function assets(accountId: string, token: string): Promise<Obj> {
 function parseAd(input: unknown) {
   const v = object(input, true);
   fields(v, ["name", "campaign_id", "adset_id", "page_id", "image_hash", "final_url",
-    "primary_text", "headline", "description", "parent_expectation"]);
+    "primary_text", "headline", "description", "parent_expectation", "creative_id"]);
   for (const key of ["campaign_id", "adset_id", "page_id"]) {
     if (typeof v[key] !== "string" || !idPattern.test(v[key])) throw new MetaCampaignError("meta_invalid_ad_input", 400);
   }
   if (typeof v.image_hash !== "string" || !hashPattern.test(v.image_hash)) throw new MetaCampaignError("meta_invalid_ad_input", 400);
+  if (v.creative_id !== undefined && (typeof v.creative_id !== "string" || !idPattern.test(v.creative_id))) {
+    throw new MetaCampaignError("meta_invalid_ad_input", 400);
+  }
   const link = text(v.final_url, 2048);
   let url: URL;
   try { url = new URL(link); } catch { throw new MetaCampaignError("meta_invalid_ad_destination", 400); }
@@ -154,7 +157,7 @@ function parseAd(input: unknown) {
     throw new MetaCampaignError("meta_invalid_parent_expectation", 400);
   }
   return { name: text(v.name, 128), campaign_id: v.campaign_id as string, adset_id: v.adset_id as string,
-    page_id: v.page_id as string, image_hash: v.image_hash, final_url: link,
+    page_id: v.page_id as string, image_hash: v.image_hash, final_url: link, creative_id: v.creative_id as string | undefined,
     primary_text: text(v.primary_text, 500), headline: text(v.headline, 80), description: text(v.description, 150),
     countries: expected.countries as string[], interests: expected.interest_ids as string[], budget: expected.daily_budget_minor };
 }
@@ -171,6 +174,9 @@ function checkParents(scope: Awaited<ReturnType<typeof readPausedMetaScope>>, co
 }
 function creativeDetails(native: Obj, accountId: string, creativeId: string): Obj {
   equal(native.id, creativeId); equal(native.account_id, accountId);
+  if (native.asset_feed_spec !== undefined && native.asset_feed_spec !== null) {
+    throw new MetaCampaignError("meta_unsupported_native_creative", 409);
+  }
   const story = object(native.object_story_spec), link = object(story.link_data);
   if (["video_data", "photo_data", "template_data", "text_data"].some(k => story[k] !== undefined) ||
       link.child_attachments !== undefined || link.picture !== undefined) {
@@ -182,11 +188,12 @@ function creativeDetails(native: Obj, accountId: string, creativeId: string): Ob
     headline: link.name, description: link.description, call_to_action: cta.type, cta_link: value.link };
 }
 async function readCreative(accountId: string, creativeId: string, token: string): Promise<Obj> {
-  const native = await metaGraph("GET", creativeId, token, { fields: "id,account_id,name,object_story_spec" });
+  const native = await metaGraph("GET", creativeId, token, { fields: "id,account_id,name,object_story_spec,asset_feed_spec" });
   return creativeDetails(native, accountId, creativeId);
 }
 function compareCreative(native: Obj, config: AdInput): void {
-  for (const k of ["name", "page_id", "image_hash", "final_url", "primary_text", "headline", "description"] as const) equal(native[k], config[k]);
+  // Meta may assign a different library name; the requested name belongs to the ad.
+  for (const k of ["page_id", "image_hash", "final_url", "primary_text", "headline", "description"] as const) equal(native[k], config[k]);
   equal(native.call_to_action, "LEARN_MORE"); equal(native.cta_link, config.final_url);
 }
 async function observedAd(accountId: string, adId: string, token: string) {
@@ -258,22 +265,28 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
     if (typeof page.promotion_eligible !== "boolean") throw new MetaCampaignError("meta_page_promotion_eligibility_unavailable", 502);
     if (!page.promotion_eligible) throw new MetaCampaignError("meta_page_not_promotion_eligible", 409);
     await image(route[1], token, config.image_hash);
-    const created = await metaGraph("POST", "act_" + route[1] + "/adcreatives", token, {
-      name: config.name,
-      object_story_spec: JSON.stringify({ page_id: config.page_id, link_data: {
-        link: config.final_url, image_hash: config.image_hash, message: config.primary_text,
-        name: config.headline, description: config.description,
-        call_to_action: { type: "LEARN_MORE", value: { link: config.final_url } },
-      } }),
-    });
-    acknowledged = true; known.creative_id = id(created.id); remember?.(known);
-    compareCreative(await readCreative(route[1], known.creative_id, token), config);
+    if (config.creative_id !== undefined) {
+      compareCreative(await readCreative(route[1], config.creative_id, token), config);
+      known.creative_id = config.creative_id; remember?.(known);
+    } else {
+      const created = await metaGraph("POST", "act_" + route[1] + "/adcreatives", token, {
+        name: config.name,
+        object_story_spec: JSON.stringify({ page_id: config.page_id, link_data: {
+          link: config.final_url, image_hash: config.image_hash, message: config.primary_text,
+          name: config.headline, description: config.description,
+          call_to_action: { type: "LEARN_MORE", value: { link: config.final_url } },
+        } }),
+      });
+      acknowledged = true; known.creative_id = id(created.id); remember?.(known);
+      compareCreative(await readCreative(route[1], known.creative_id, token), config);
+    }
     // Recheck the parents immediately before constructing a new ad.
     checkParents(await readPausedMetaScope(config.campaign_id, token, route[1], config.adset_id), config);
     const ad = await metaGraph("POST", "act_" + route[1] + "/ads", token, {
       name: config.name, adset_id: config.adset_id,
       creative: JSON.stringify({ creative_id: known.creative_id }), status: "PAUSED",
     });
+    acknowledged = true;
     known.ad_id = id(ad.id); remember?.(known);
     const native = await observedAd(route[1], known.ad_id, token);
     equal(native.campaign_id, config.campaign_id); equal(native.adset_id, config.adset_id);
@@ -285,6 +298,7 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
   } catch (error) {
     if (!(error instanceof MetaCampaignError)) throw error;
     return response({ error: error.code, ...error.source,
+      ...(known.creative_id ? known : {}),
       ...(acknowledged || error.uncertain ? { status: "write_unverified", ...known } : {}),
       paid_delivery_authorized: false }, error.status);
   }
