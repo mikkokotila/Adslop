@@ -32,6 +32,14 @@ To verify the first executable money-in/money-out capability, run `corepack pnpm
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 
+## Explicit Google campaign geography and language
+
+Authenticated `GET /v1/google-ads/accounts/{account_id}/paused-search-campaigns/{campaign_id}/targeting` reads a PAUSED Search campaign's current native criteria and constants. Empty country or language criteria are reported as empty, with `geography_and_language_bounded: false`; no country or language is assumed. Removed criteria are excluded, and paused positive criteria do not establish active bounds.
+
+`PUT` on the same path accepts only explicit `countries` and `languages`, for example `{"countries":["US"],"languages":["en"]}`. These values are examples, not defaults. Each list must contain 1–20 unique native codes. Country codes are uppercase ISO-style codes; language codes must resolve exactly in Google's targetable language catalogue. Unknown, disabled or ambiguous constants fail before mutation. The path verifies native account ownership and requires a PAUSED Search campaign.
+
+One atomic GoogleAds mutation replaces positive location/language criteria, sets presence-only positive geography and explicitly retains campaign PAUSED status. It preserves matching active constraints, negative geography, device criteria and other unrelated criteria. Independent native readback must match the requested constants, presence setting, paused state and preserved criteria. An identical verified configuration sends no mutation. A definitive native 4xx rejection is `write_rejected`; lost responses or unverifiable readback after acknowledgment are `write_unverified`. Both retain the known campaign and safe native HTTP status. Writes are never automatically retried. Native configuration is not paid-launch approval or proof of settled spend: responses retain `launch_ready: false` and `paid_delivery_authorized: false`.
+
 ## Campaign pause and durable evidence
 
 Authenticated `POST /v1/{google-ads|meta}/accounts/{account_id}/campaigns/{campaign_id}/pause` accepts only `{}`. It checks native ownership, campaign identity and configured status, requests only `PAUSED` when necessary, and independently reads the campaign again before returning `verified_paused`. Google's campaign resource namespace and Meta's campaign-only objective/buying-type fields distinguish campaigns from child ads/ad sets; a paused child cannot satisfy the request. An already paused campaign receives no native mutation. The operation neither activates delivery nor changes children, budgets, targeting, billing or money observations. A verified configured pause does not establish immediate spend settlement.

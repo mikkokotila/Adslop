@@ -7,6 +7,7 @@ import { googleAdsRead, GoogleAdsError, GoogleAdsClient, type GoogleAdsConfig } 
 import { GoogleCostJournal, GoogleJournalError } from "./google-ledger";
 import { MetaCostJournal, MetaJournalError } from "./meta-ledger";
 import { pausedSearchCampaigns } from "./google-campaigns";
+import { handleGoogleTargeting } from "./google-targeting";
 import { handleMetaRequest, readMetaSpendReport, MetaReadError } from "./meta";
 import { handleMetaCampaignRequest } from "./meta-campaigns";
 import { handleMetaAdRequest } from "./meta-ads";
@@ -692,6 +693,9 @@ export default {
     }
     const url = new URL(request.url);
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+    if (/^\/v1\/google-ads\/accounts\/[0-9]{10}\/paused-search-campaigns\/[1-9][0-9]*\/targeting$/.test(url.pathname)) {
+      return handleGoogleTargeting(request, url, env);
+    }
     const pause = /^\/v1\/(google-ads|meta)\/accounts\/([1-9][0-9]{0,31})\/campaigns\/([1-9][0-9]{0,31})\/pause$/.exec(url.pathname);
     if (pause) {
       const reply = (body: unknown, status = 200) => Response.json(body, {

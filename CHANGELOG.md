@@ -1,3 +1,7 @@
+# v0.14.0
+
+Add explicit country and language configuration for paused Google Search campaigns, resolved against native constants and independently verified without changing unrelated criteria or activating delivery.
+
 # v0.13.0
 
 Add account-scoped Google and Meta campaign pause operations with durable attempt checkpoints and independent native verification; retain uncertain execution without automatic retries or money admission.
