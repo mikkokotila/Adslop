@@ -17,6 +17,31 @@ function obj(value: unknown): Obj {
 function validId(value: unknown): value is string {
   return typeof value === "string" && /^[1-9][0-9]{0,31}$/.test(value);
 }
+function metaInterestIds(value: unknown): string[] {
+  const targeting = obj(value);
+  let interests = targeting.interests;
+  if (targeting.flexible_spec !== undefined) {
+    if (interests !== undefined || !Array.isArray(targeting.flexible_spec) ||
+        targeting.flexible_spec.length !== 1) {
+      throw new MetaCampaignError("meta_readback_mismatch", 409);
+    }
+    const group = obj(targeting.flexible_spec[0]);
+    if (Object.keys(group).length !== 1 || !Object.hasOwn(group, "interests")) {
+      throw new MetaCampaignError("meta_readback_mismatch", 409);
+    }
+    interests = group.interests;
+  }
+  if (!Array.isArray(interests) || !interests.length) {
+    throw new MetaCampaignError("meta_readback_mismatch", 409);
+  }
+  const ids = interests.map(item => {
+    const id = obj(item).id;
+    if (!validId(id)) throw new MetaCampaignError("meta_readback_mismatch", 409);
+    return id;
+  });
+  if (new Set(ids).size !== ids.length) throw new MetaCampaignError("meta_readback_mismatch", 409);
+  return ids;
+}
 function text(value: unknown, max = 128): string {
   if (typeof value !== "string" || !value.trim() || value !== value.trim() ||
       value.length > max || /[\u0000-\u001f]/.test(value)) {
@@ -113,10 +138,10 @@ async function snapshot(id: string, token: string, accountId: string, adsetId?: 
   if (adset.id !== adsetId || adset.campaign_id !== id || adset.account_id !== accountId ||
       adset.status !== "PAUSED" || adset.optimization_goal !== "LINK_CLICKS" ||
       adset.billing_event !== "IMPRESSIONS" ||
-      !Array.isArray(geography?.countries) || !geography.countries.length ||
-      !Array.isArray(targeting?.interests) || !targeting.interests.length) {
+      !Array.isArray(geography?.countries) || !geography.countries.length) {
     throw new MetaCampaignError("meta_readback_mismatch", 409);
   }
+  metaInterestIds(targeting);
   return { campaign, adset };
 }
 /** Only explicit PAUSED creation and independent, read-only native retrieval. */
@@ -204,9 +229,7 @@ export async function handleMetaCampaignRequest(
       !Array.isArray(actualTargeting) ? actualTargeting as Obj : null;
     const geo = actual?.geo_locations && typeof actual.geo_locations === "object"
       ? actual.geo_locations as Obj : null;
-    const returnedInterests = actual?.interests;
-    const actualIds = Array.isArray(returnedInterests)
-      ? returnedInterests.map(v => obj(v).id) : [];
+    const actualIds = metaInterestIds(actual);
     const countryValues = geo?.countries;
     if (!native.adset || native.adset.daily_budget !== config.budget ||
         !Array.isArray(countryValues) ||
@@ -231,4 +254,4 @@ export async function handleMetaCampaignRequest(
   }
 }
 
-export { graph as metaGraph, snapshot as readPausedMetaScope, MetaCampaignError };
+export { graph as metaGraph, snapshot as readPausedMetaScope, MetaCampaignError, metaInterestIds };

@@ -21,7 +21,7 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
   paged?: boolean; deny?: boolean; pagesDenied?: boolean; unsafeNext?: boolean;
   pageTasks?: unknown; promotionEligible?: unknown; wrongPage?: boolean;
   creativeName?: string; creativeAccount?: string; creativeIdentity?: string; creativeStory?: Obj;
-  assetFeed?: Obj; adName?: string; activeAfterCreativeRead?: boolean;
+  assetFeed?: Obj; adName?: string; activeAfterCreativeRead?: boolean; targeting?: Obj;
   beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
@@ -94,7 +94,7 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
       objective: "OUTCOME_TRAFFIC", special_ad_categories: [] });
     if (path === adset) return Response.json({ id: adset, account_id: account, campaign_id: campaign,
       status: "PAUSED", daily_budget: "500", optimization_goal: "LINK_CLICKS", billing_event: "IMPRESSIONS",
-      targeting: { geo_locations: { countries: ["US"] }, interests: [{ id: "7001" }] } });
+      targeting: options.targeting ?? { geo_locations: { countries: ["US"] }, interests: [{ id: "7001" }] } });
     if (path === creative) {
       creativeRead = true;
       return Response.json({ id: options.creativeIdentity ?? creative, account_id: options.creativeAccount ?? account,
@@ -154,6 +154,36 @@ it("creates a paused ad only after verifying its Page image and paused parents",
   expect(await readback.json()).toMatchObject({ status: "verified_paused", native: {
     campaign_id: campaign, adset_id: adset, ad_id: ad, creative: { final_url: body.final_url, page_id: page, image_hash: hash },
   } });
+});
+it("creates paused ads against normalized OR-interest parents", async () => {
+  const targeting={geo_locations:{countries:["US"]},flexible_spec:[{interests:[{id:"7001"}]}],
+    targeting_automation:{advantage_audience:1}};
+  const native=mock({targeting});
+  const result=await api("POST","/paused-ads",body);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({status:"verified_paused",configuration_match:true,
+    native:{adset:{targeting}},paid_delivery_authorized:false,launch_ready:false});
+  expect(native.mutations).toEqual(["act_"+account+"/adcreatives","act_"+account+"/ads"]);
+  const readback=await api("GET","/paused-ads/"+ad);
+  expect(readback.status).toBe(200);
+  expect(await readback.json()).toMatchObject({native:{adset:{targeting}}});
+});
+it("blocks changed normalized interests before ad creation", async () => {
+  const cases=[
+    {countries:["US"],interests:[{id:"7002"}],budget:"500"},
+    {countries:["US"],interests:[{id:"7001"},{id:"7002"}],budget:"500"},
+    {countries:["CA"],interests:[{id:"7001"}],budget:"500"},
+    {countries:["US"],interests:[{id:"7001"}],budget:"501"},
+  ];
+  for (const [index,item] of cases.entries()) {
+    const native=mock({targeting:{geo_locations:{countries:item.countries},
+      flexible_spec:[{interests:item.interests}]}});
+    const result=await api("POST","/paused-ads",{...body,
+      parent_expectation:{...body.parent_expectation,daily_budget_minor:item.budget}},"normalized-"+index);
+    expect(result.status).toBe(409);
+    expect(await result.json()).toMatchObject({paid_delivery_authorized:false});
+    expect(native.mutations).toEqual([]);
+  }
 });
 it("accepts a newly managed Page without promotion history", async () => {
   const native = mock({ paged: true, pageTasks: ["ADVERTISE"] });
