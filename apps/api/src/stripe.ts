@@ -20,9 +20,14 @@ export interface StripeConnection {
 export interface StripeEvent {
   id: string; type: string; object_id: string; created: number; livemode: boolean;
 }
+export interface StripeConfigurationIssue {
+  field: "connection" | "account_id" | "api_key" | "webhook_secret" | "prices";
+  reason: "invalid" | "missing" | "ambiguous";
+}
 export class StripeError extends Error {
   constructor(readonly code: string, readonly status = 422, readonly retryable = false,
-    readonly request_id: string | null = null) { super(code); }
+    readonly request_id: string | null = null,
+    readonly configuration_issue: StripeConfigurationIssue | null = null) { super(code); }
 }
 export function stripeObject(value: unknown): StripeObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -62,6 +67,9 @@ export function productId(value: unknown): value is string {
 export function stripeConnection(env: StripeSettings, mode: StripeMode): StripeConnection {
   const raw = mode === "live" ? env.STRIPE_LIVE_CONNECTION : env.STRIPE_SANDBOX_CONNECTION;
   if (!raw) throw new StripeError("stripe_not_configured", 503, true);
+  let field: StripeConfigurationIssue["field"] = "connection";
+  const invalid = (name: StripeConfigurationIssue["field"], reason: StripeConfigurationIssue["reason"]) =>
+    new StripeError("stripe_invalid_configuration", 503, true, null, { field: name, reason });
   try {
     const value = stripeObject(JSON.parse(raw));
     if (Object.keys(value).some(k => !["account_id", "api_key", "webhook_secret", "prices"].includes(k))) {
@@ -69,18 +77,24 @@ export function stripeConnection(env: StripeSettings, mode: StripeMode): StripeC
     }
     const apiKey = mode === "live" ? env.STRIPE_LIVE_API_KEY : env.STRIPE_SANDBOX_API_KEY;
     const webhookSecret = mode === "live" ? env.STRIPE_LIVE_WEBHOOK_SECRET : env.STRIPE_SANDBOX_WEBHOOK_SECRET;
-    if ((apiKey !== undefined && Object.hasOwn(value, "api_key")) ||
-        (webhookSecret !== undefined && Object.hasOwn(value, "webhook_secret"))) {
-      throw new Error("ambiguous_credentials");
+    if (apiKey !== undefined && Object.hasOwn(value, "api_key")) {
+      throw invalid("api_key", "ambiguous");
+    }
+    if (webhookSecret !== undefined && Object.hasOwn(value, "webhook_secret")) {
+      throw invalid("webhook_secret", "ambiguous");
     }
     if (apiKey !== undefined) value.api_key = apiKey;
     if (webhookSecret !== undefined) value.webhook_secret = webhookSecret;
+    field = "account_id";
     const account = stripeId(value.account_id, "acct");
     if (typeof value.api_key !== "string" ||
-        !new RegExp("^[sr]k_" + (mode === "live" ? "live" : "test") + "_[A-Za-z0-9]+$").test(value.api_key) ||
-        typeof value.webhook_secret !== "string" || !/^whsec_[A-Za-z0-9]+$/.test(value.webhook_secret)) {
-      throw new Error("invalid_credentials");
+        !new RegExp("^[sr]k_" + (mode === "live" ? "live" : "test") + "_[A-Za-z0-9]+$").test(value.api_key)) {
+      throw invalid("api_key", value.api_key === undefined ? "missing" : "invalid");
     }
+    if (typeof value.webhook_secret !== "string" || !/^whsec_[A-Za-z0-9]+$/.test(value.webhook_secret)) {
+      throw invalid("webhook_secret", value.webhook_secret === undefined ? "missing" : "invalid");
+    }
+    field = "prices";
     const prices: StripeConnection["prices"] = {};
     const entries = Object.entries(stripeObject(value.prices));
     if (entries.length < 1 || entries.length > 100) throw new Error("invalid_price_map");
@@ -94,8 +108,9 @@ export function stripeConnection(env: StripeSettings, mode: StripeMode): StripeC
       prices[id] = { product_id: item.product_id, stripe_product_id: stripeProductId(item.stripe_product_id) };
     }
     return { mode, account_id: account, api_key: value.api_key, webhook_secret: value.webhook_secret, prices };
-  } catch {
-    throw new StripeError("stripe_invalid_configuration", 503, true);
+  } catch (error) {
+    if (error instanceof StripeError && error.configuration_issue) throw error;
+    throw invalid(field, "invalid");
   }
 }
 export function stripeEvent(value: unknown, mode: StripeMode): StripeEvent {

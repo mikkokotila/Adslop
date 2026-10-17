@@ -1,3 +1,7 @@
+# v0.12.3
+
+- Identify rejected Stripe configuration fields without exposing credentials or changing accounting validation.
+
 # v0.12.2
 
 - Repair the moved official Arrow Parquet reference so required documentation validation can complete.

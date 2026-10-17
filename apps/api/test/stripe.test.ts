@@ -125,7 +125,8 @@ it("reports absent or malformed configuration without exposing credentials", asy
   vi.stubGlobal("fetch", vi.fn());
   expect((await api("/sandbox/status")).status).toBe(503);
   const response = await api("/sandbox/status", { ...env, STRIPE_SANDBOX_CONNECTION: "malformed" } as Env);
-  expect(await response.json()).toEqual({ error: "stripe_invalid_configuration", request_id: null });
+  expect(await response.json()).toEqual({ error: "stripe_invalid_configuration", request_id: null,
+    configuration_issue: { field: "connection", reason: "invalid" } });
   expect(fetch).not.toHaveBeenCalled();
 });
 it("rejects tampered, expired and wrong-mode signed messages before monetary source reads", async () => {
@@ -601,7 +602,7 @@ it("rejects ambiguous or incomplete separate credentials before source reads", a
     const runtime = { ...separate, ...patch };
     const response = await api("/sandbox/status", runtime);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ error: "stripe_invalid_configuration", request_id: null });
+    expect(await response.json()).toMatchObject({ error: "stripe_invalid_configuration", request_id: null });
     const webhook = await signed(f.event("evt_InvalidSeparate"), f.config, runtime);
     expect(webhook.status).toBe(503);
   }
@@ -618,4 +619,64 @@ it("supports moving one credential at a time without changing the legacy connect
   expect(stripeConnection({ STRIPE_SANDBOX_CONNECTION: JSON.stringify(signingless), STRIPE_SANDBOX_WEBHOOK_SECRET: webhook_secret }, "sandbox"))
     .toEqual(f.config);
   expect(stripeConnection(f.runtime, "sandbox")).toEqual(f.config);
+});
+
+it.each(["live", "sandbox"] as const)("identifies malformed Stripe configuration without disclosing configured values (%s)", async mode => {
+  const f = fixture(mode);
+  const prefix = mode === "live" ? "STRIPE_LIVE" : "STRIPE_SANDBOX";
+  const full = { account_id: account, api_key: f.config.api_key,
+    webhook_secret: f.config.webhook_secret, prices: f.config.prices };
+  const separate: Env = { ...f.runtime,
+    [prefix + "_CONNECTION"]: JSON.stringify({ account_id: account, prices: f.config.prices }),
+    [prefix + "_API_KEY"]: f.config.api_key, [prefix + "_WEBHOOK_SECRET"]: f.config.webhook_secret };
+  const cases: [Partial<Env>, string, string][] = [
+    [{ [prefix + "_CONNECTION"]: "malformed " + f.config.api_key }, "connection", "invalid"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ ...full, unknown: f.config.webhook_secret }) }, "connection", "invalid"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ ...full, account_id: "invalid" }),
+      [prefix + "_API_KEY"]: undefined, [prefix + "_WEBHOOK_SECRET"]: undefined }, "account_id", "invalid"],
+    [{ [prefix + "_API_KEY"]: undefined }, "api_key", "missing"],
+    [{ [prefix + "_WEBHOOK_SECRET"]: undefined }, "webhook_secret", "missing"],
+    [{ [prefix + "_API_KEY"]: f.config.api_key + " " }, "api_key", "invalid"],
+    [{ [prefix + "_API_KEY"]: mode === "live" ? "rk_test_wrongmode" : "rk_live_wrongmode" }, "api_key", "invalid"],
+    [{ [prefix + "_WEBHOOK_SECRET"]: f.config.webhook_secret + " " }, "webhook_secret", "invalid"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ ...full }) }, "api_key", "ambiguous"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ account_id: account, prices: f.config.prices,
+      webhook_secret: f.config.webhook_secret }) }, "webhook_secret", "ambiguous"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ ...full, prices: {} }),
+      [prefix + "_API_KEY"]: undefined, [prefix + "_WEBHOOK_SECRET"]: undefined }, "prices", "invalid"],
+    [{ [prefix + "_CONNECTION"]: JSON.stringify({ ...full, prices: { [price]: {
+      product_id: "stripe-test", stripe_product_id: "../invalid" } } }),
+      [prefix + "_API_KEY"]: undefined, [prefix + "_WEBHOOK_SECRET"]: undefined }, "prices", "invalid"],
+  ];
+  for (const [patch, field, reason] of cases) {
+    const runtime = { ...separate, ...patch };
+    const response = await api("/" + mode + "/status", runtime);
+    expect(response.status).toBe(503);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ error: "stripe_invalid_configuration", request_id: null,
+      configuration_issue: { field, reason } });
+    expect(body).not.toContain(f.config.api_key);
+    expect(body).not.toContain(f.config.webhook_secret);
+    expect((await worker.fetch(new Request(root + "/" + mode + "/status"), runtime)).status).toBe(401);
+  }
+  expect(f.transport).not.toHaveBeenCalled();
+});
+
+it("recovers a signed delivery after correcting connection configuration", async () => {
+  const f = fixture();
+  const event = f.event("evt_ConfigurationRecovery");
+  const runtime: Env = { ...f.runtime,
+    STRIPE_SANDBOX_CONNECTION: JSON.stringify({ account_id: account, prices: f.config.prices }),
+    STRIPE_SANDBOX_API_KEY: f.config.api_key };
+  const failed = await signed(event, f.config, runtime);
+  expect(failed.status).toBe(503);
+  expect(await failed.json()).toEqual({ error: "stripe_invalid_configuration", request_id: null,
+    configuration_issue: { field: "webhook_secret", reason: "missing" } });
+  expect(f.transport).not.toHaveBeenCalled();
+  runtime.STRIPE_SANDBOX_WEBHOOK_SECRET = f.config.webhook_secret;
+  expect(await (await signed(event, f.config, runtime)).json()).toMatchObject({ status: "admitted", created: 1 });
+  expect(await (await signed(event, f.config, runtime)).json()).toMatchObject({ status: "duplicate", created: 0, duplicate: 1 });
+  expect(await (await api("/sandbox/effects?product_id=stripe-test", runtime)).json())
+    .toMatchObject({ effects: [{ resource_id: "ch_ContractFixture", amount_minor: "1255" }], has_more: false });
+  expect(await (await economics(runtime)).json()).toMatchObject({ subscription_revenue_minor: 0 });
 });
