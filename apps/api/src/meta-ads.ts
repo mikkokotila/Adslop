@@ -76,9 +76,13 @@ async function account(accountId: string, token: string): Promise<Obj> {
   equal(a.id, "act_" + accountId); equal(a.account_id, accountId);
   return { account_id: accountId, name: a.name, currency: a.currency, time_zone: a.timezone_name };
 }
-async function pages(accountId: string, token: string): Promise<Obj[]> {
-  return (await rows("act_" + accountId + "/promote_pages", token, { fields: "id,name,link" }))
-    .map(p => ({ id: id(p.id), name: p.name, link: p.link }));
+async function pages(token: string): Promise<Obj[]> {
+  return (await rows("me/accounts", token, { fields: "id,name,link,tasks", is_promotable: "true" }))
+    .map(p => {
+      const tasks = array(p.tasks);
+      if (tasks.some(v => typeof v !== "string")) throw new MetaCampaignError("meta_invalid_native_response", 502);
+      return { id: id(p.id), name: p.name, link: p.link, tasks };
+    }).filter(p => p.tasks.includes("ADVERTISE") || p.tasks.includes("MANAGE"));
 }
 async function images(accountId: string, token: string, hash?: string): Promise<Obj[]> {
   return (await rows("act_" + accountId + "/adimages", token, {
@@ -97,7 +101,7 @@ async function assets(accountId: string, token: string): Promise<Obj> {
   const current = await account(accountId, token);
   const result: Obj = { account: current, complete: true, source: "meta_graph", graph_version: "v25.0" };
   const reads: Array<[string, () => Promise<Obj[]>]> = [
-    ["pages", () => pages(accountId, token)], ["images", () => images(accountId, token)],
+    ["pages", () => pages(token)], ["images", () => images(accountId, token)],
     ["campaigns", async () => (await rows("act_" + accountId + "/campaigns", token,
       { fields: "id,account_id,name,status,objective" })).map(v => {
         equal(v.account_id, accountId);
@@ -248,7 +252,11 @@ export async function handleMetaAdRequest(request: Request, url: URL, token: str
     known.campaign_id = config.campaign_id; known.adset_id = config.adset_id; known.image_hash = config.image_hash;
     await account(route[1], token);
     checkParents(await readPausedMetaScope(config.campaign_id, token, route[1], config.adset_id), config);
-    if (!(await pages(route[1], token)).some(p => p.id === config.page_id)) throw new MetaCampaignError("meta_page_not_authorized_for_account", 403);
+    if (!(await pages(token)).some(p => p.id === config.page_id)) throw new MetaCampaignError("meta_page_not_authorized_for_account", 403);
+    const page = await metaGraph("GET", config.page_id, token, { fields: "id,promotion_eligible" });
+    equal(page.id, config.page_id);
+    if (typeof page.promotion_eligible !== "boolean") throw new MetaCampaignError("meta_page_promotion_eligibility_unavailable", 502);
+    if (!page.promotion_eligible) throw new MetaCampaignError("meta_page_not_promotion_eligible", 409);
     await image(route[1], token, config.image_hash);
     const created = await metaGraph("POST", "act_" + route[1] + "/adcreatives", token, {
       name: config.name,
