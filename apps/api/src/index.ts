@@ -11,6 +11,7 @@ import { handleGoogleTargeting } from "./google-targeting";
 import { handleMetaRequest, readMetaSpendReport, MetaReadError } from "./meta";
 import { handleMetaCampaignRequest } from "./meta-campaigns";
 import { handleMetaAdRequest } from "./meta-ads";
+import { pauseCampaign, pauseHistory, type CampaignPauseProvider } from "./campaign-pause";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -92,6 +93,13 @@ export class MoneyLedger extends DurableObject<Env> {
     new GoogleCostJournal(this.ctx.storage.sql).create();
     new MetaCostJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS campaign_pause_attempts (
+        id INTEGER PRIMARY KEY, provider TEXT NOT NULL, account_id TEXT NOT NULL,
+        campaign_id TEXT NOT NULL, operation_id TEXT NOT NULL,
+        requested_at TEXT NOT NULL, body TEXT NOT NULL
+      )
+    `);
+    this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS meta_ad_operations (
         request_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
         state TEXT NOT NULL, result TEXT, http_status INTEGER
@@ -137,6 +145,16 @@ export class MoneyLedger extends DurableObject<Env> {
         to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
       )
     `);
+  }
+
+  async campaignPause(provider: CampaignPauseProvider, account: string, campaign: string,
+    config: GoogleAdsConfig & { META_ACCESS_TOKEN?: string }): Promise<{ status: number; body: string }> {
+    const result = await pauseCampaign(provider, account, campaign, { ...this.env, ...config }, this.ctx.storage.sql);
+    return { status: result.status, body: JSON.stringify(result.body) };
+  }
+
+  async campaignPauseHistory(provider: CampaignPauseProvider, account: string, campaign: string): Promise<string> {
+    return JSON.stringify(pauseHistory(provider, account, campaign, this.ctx.storage.sql));
   }
 
   private stripeImportRunning = false;
@@ -677,6 +695,34 @@ export default {
     const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
     if (/^\/v1\/google-ads\/accounts\/[0-9]{10}\/paused-search-campaigns\/[1-9][0-9]*\/targeting$/.test(url.pathname)) {
       return handleGoogleTargeting(request, url, env);
+    }
+    const pause = /^\/v1\/(google-ads|meta)\/accounts\/([1-9][0-9]{0,31})\/campaigns\/([1-9][0-9]{0,31})\/pause$/.exec(url.pathname);
+    if (pause) {
+      const reply = (body: unknown, status = 200) => Response.json(body, {
+        status, headers: { "Cache-Control": "no-store" },
+      });
+      if (url.search || pause[1] === "google-ads" && !/^[0-9]{10}$/.test(pause[2])) {
+        return reply({ error: "campaign_pause_invalid_query_or_identity" }, 400);
+      }
+      const provider = pause[1] as CampaignPauseProvider;
+      if (request.method === "GET") {
+        return reply(JSON.parse(await ledger.campaignPauseHistory(provider, pause[2], pause[3])));
+      }
+      if (request.method !== "POST") return reply({ error: "campaign_pause_method_not_allowed" }, 405);
+      const raw = await request.text();
+      if (raw.length > 1024) return reply({ error: "campaign_pause_request_too_large" }, 413);
+      let input: unknown;
+      try { input = JSON.parse(raw); }
+      catch { return reply({ error: "campaign_pause_invalid_json" }, 400); }
+      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length) {
+        return reply({ error: "campaign_pause_empty_object_required" }, 400);
+      }
+      const result = await ledger.campaignPause(provider, pause[2], pause[3], {
+        GOOGLE_ADS_CLIENT_ID: env.GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET: env.GOOGLE_ADS_CLIENT_SECRET,
+        GOOGLE_ADS_REFRESH_TOKEN: env.GOOGLE_ADS_REFRESH_TOKEN, GOOGLE_ADS_LOGIN_CUSTOMER_ID: env.GOOGLE_ADS_LOGIN_CUSTOMER_ID,
+        META_ACCESS_TOKEN: env.META_ACCESS_TOKEN,
+      });
+      return reply(JSON.parse(result.body), result.status);
     }
     if (/^\/v1\/google-ads\/accounts\/[0-9]{10}\/paused-search-campaigns(?:\/[1-9][0-9]*)?$/.test(url.pathname)) {
       return pausedSearchCampaigns(request, url, env);
