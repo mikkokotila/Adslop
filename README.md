@@ -32,6 +32,14 @@ To verify the first executable money-in/money-out capability, run `corepack pnpm
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 
+## Campaign pause and durable evidence
+
+Authenticated `POST /v1/{google-ads|meta}/accounts/{account_id}/campaigns/{campaign_id}/pause` accepts only `{}`. It checks native ownership and configured campaign status, requests only `PAUSED` when necessary, and independently reads the campaign again before returning `verified_paused`. An already paused campaign receives no native mutation. The operation neither activates delivery nor changes children, budgets, targeting, billing or money observations. A verified configured pause does not establish immediate spend settlement.
+
+Each POST creates a new explicit operator attempt. The existing Durable Object records the request before native calls, then checkpoints the write intent, acknowledgment and independent observations. Failed readback or ambiguous execution returns `write_unverified`; a definitive provider rejection is `write_rejected`. No native write is automatically retried. Inspect the provider before making a new explicit attempt after uncertainty; replaying history never executes an action.
+
+`GET` on the same path returns the last 100 durable attempts, newest first, with `limit` and `truncated`. It performs no native calls and does not claim current native status. An interrupted attempt retains its last checkpoint (`incomplete` or `write_unverified`), including across actor eviction. Both methods require the operator bearer, reject query parameters and return `Cache-Control: no-store`. Native Meta pause acceptance requires actual write access; tests of the protocol are not proof of that grant. Native active-to-paused proof requires an authorized active campaign; never activate an object to manufacture a stop test.
+
 ## Meta paused image ads
 
 `GET /v1/meta/accounts/{account_id}/creative-assets` reads the account, eligible advertising Pages, native image hashes, campaigns, ads, creatives and granted token permissions. Each collection reports `available` or `unavailable`; an inaccessible Page catalog is not an empty list. Page access tokens are never returned. This inventory is read-only.
