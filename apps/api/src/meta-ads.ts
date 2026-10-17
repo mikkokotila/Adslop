@@ -34,6 +34,13 @@ function array(v: unknown): unknown[] {
   if (!Array.isArray(v)) throw new MetaCampaignError("meta_invalid_native_response", 502);
   return v;
 }
+function optionalCode(v: unknown): number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) {
+    throw new MetaCampaignError("meta_invalid_native_response", 502);
+  }
+  return v;
+}
 function sameSet(actual: unknown, expected: string[]): void {
   const values = array(actual);
   if (values.length !== expected.length || new Set(values).size !== values.length || expected.some(v => !values.includes(v))) {
@@ -72,9 +79,13 @@ async function rows(path: string, token: string, params: Record<string, string>)
   throw new MetaCampaignError("meta_asset_page_limit", 503);
 }
 async function account(accountId: string, token: string): Promise<Obj> {
-  const a = await metaGraph("GET", "act_" + accountId, token, { fields: "id,account_id,name,currency,timezone_name" });
+  const a = await metaGraph("GET", "act_" + accountId, token,
+    { fields: "id,account_id,name,currency,timezone_name,account_status,disable_reason,capabilities" });
   equal(a.id, "act_" + accountId); equal(a.account_id, accountId);
-  return { account_id: accountId, name: a.name, currency: a.currency, time_zone: a.timezone_name };
+  const capabilities = a.capabilities == null ? null : array(a.capabilities);
+  if (capabilities?.some(v => typeof v !== "string")) throw new MetaCampaignError("meta_invalid_native_response", 502);
+  return { account_id: accountId, name: a.name, currency: a.currency, time_zone: a.timezone_name,
+    account_status: optionalCode(a.account_status), disable_reason: optionalCode(a.disable_reason), capabilities };
 }
 async function pages(token: string): Promise<Obj[]> {
   return (await rows("me/accounts", token, { fields: "id,name,link,tasks", is_promotable: "true" }))
@@ -197,14 +208,18 @@ function compareCreative(native: Obj, config: AdInput): void {
   equal(native.call_to_action, "LEARN_MORE"); equal(native.cta_link, config.final_url);
 }
 async function observedAd(accountId: string, adId: string, token: string) {
-  const a = await metaGraph("GET", adId, token, { fields: "id,account_id,campaign_id,adset_id,name,status,effective_status,creative{id}" });
+  const a = await metaGraph("GET", adId, token,
+    { fields: "id,account_id,campaign_id,adset_id,name,status,effective_status,creative{id},issues_info,ad_review_feedback" });
   equal(a.id, adId); equal(a.account_id, accountId); equal(a.status, "PAUSED");
+  const issues = a.issues_info == null ? null : array(a.issues_info).map(v => object(v));
+  const feedback = a.ad_review_feedback == null ? null : object(a.ad_review_feedback);
   const campaignId = id(a.campaign_id), adsetId = id(a.adset_id), creativeId = id(object(a.creative).id);
   const parents = await readPausedMetaScope(campaignId, token, accountId, adsetId);
   const creative = await readCreative(accountId, creativeId, token);
   return { account_id: accountId, campaign_id: campaignId, adset_id: adsetId, creative_id: creativeId, ad_id: adId,
     campaign: parents.campaign, adset: parents.adset,
-    ad: { id: adId, name: a.name, status: a.status, effective_status: a.effective_status }, creative };
+    ad: { id: adId, name: a.name, status: a.status, effective_status: a.effective_status,
+      issues_info: issues, ad_review_feedback: feedback }, creative };
 }
 function imageData(value: unknown): { base64: string; bytes: Uint8Array } {
   if (typeof value !== "string" || value.length > 5_592_408 || !value.length || value.length % 4 ||

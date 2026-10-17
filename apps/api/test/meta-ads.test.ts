@@ -22,6 +22,7 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
   pageTasks?: unknown; promotionEligible?: unknown; wrongPage?: boolean;
   creativeName?: string; creativeAccount?: string; creativeIdentity?: string; creativeStory?: Obj;
   assetFeed?: Obj; adName?: string; activeAfterCreativeRead?: boolean; targeting?: Obj;
+  accountEvidence?: Obj; adEvidence?: Obj;
   beforeCreative?: () => Promise<void>; beforeAd?: () => Promise<void> } = {}) {
   const calls: Array<{ path: string; method: string; params: Record<string, string> }> = [];
   const mutations: string[] = [];
@@ -59,7 +60,7 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
       }
     }
     if (path === "act_" + account) return Response.json({ id: "act_" + account,
-      account_id: account, name: "Fixture account", currency: "USD", timezone_name: "UTC" });
+      account_id: account, name: "Fixture account", currency: "USD", timezone_name: "UTC", ...options.accountEvidence });
     if (path.endsWith("/promote_pages")) return Response.json({ data: [] });
     if (path === "me/accounts") {
       expect(params.fields).toBe("id,name,link,tasks");
@@ -105,7 +106,8 @@ function mock(options: { missingPage?: boolean; missingImage?: boolean; badCreat
     if (path === ad) {
       if (options.readFailure) return Response.json({ error: { code: 200, fbtrace_id: "trace-read" } }, { status: 403 });
       return Response.json({ id: ad, account_id: account, campaign_id: campaign, adset_id: adset,
-        name: options.adName ?? body.name, status: "PAUSED", effective_status: "CAMPAIGN_PAUSED", creative: { id: creative } });
+        name: options.adName ?? body.name, status: "PAUSED", effective_status: "CAMPAIGN_PAUSED", creative: { id: creative },
+        ...options.adEvidence });
     }
     throw Error("Unexpected fixture path " + path);
   });
@@ -120,6 +122,81 @@ beforeEach(async () => {
   });
 });
 afterEach(() => { vi.unstubAllGlobals(); });
+
+it("exposes native account delivery evidence without payment details", async () => {
+  const evidence = { account_status: 1, disable_reason: 0, capabilities: ["HAS_VALID_PAYMENT_METHODS"] };
+  const native = mock({ accountEvidence: { ...evidence,
+    funding_source_details: { id: "private-payment-id", display_string: "private-payment-display" } } });
+  const result = await api("GET", "/creative-assets");
+  expect(result.status).toBe(200);
+  const value = await result.json();
+  expect(value).toMatchObject({ account: { account_id: account, ...evidence } });
+  expect(JSON.stringify(value)).not.toContain("private-payment");
+  expect(native.calls.find(v => v.path === "act_" + account)?.params.fields)
+    .toBe("id,account_id,name,currency,timezone_name,account_status,disable_reason,capabilities");
+  expect(native.mutations).toEqual([]);
+});
+it("preserves omitted native account evidence as unknown", async () => {
+  for (const accountEvidence of [{}, { account_status: null, disable_reason: null, capabilities: null }]) {
+    mock({ accountEvidence });
+    const result = await api("GET", "/creative-assets");
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ account: { account_status: null, disable_reason: null, capabilities: null } });
+  }
+  mock({ accountEvidence: { account_status: 0, disable_reason: 0, capabilities: [] } });
+  expect(await (await api("GET", "/creative-assets")).json())
+    .toMatchObject({ account: { account_status: 0, disable_reason: 0, capabilities: [] } });
+});
+it("exposes native ad review evidence without claiming approval", async () => {
+  const evidence = { issues_info: [{ error_code: 100, error_message: "Native issue evidence" }],
+    ad_review_feedback: { global: { policy: "Native review feedback" } } };
+  const native = mock({ adEvidence: evidence });
+  const result = await api("GET", "/paused-ads/" + ad);
+  expect(result.status).toBe(200);
+  const value = await result.json();
+  expect(value).toMatchObject({ status: "verified_paused", native: { ad: evidence },
+    configuration_comparison: "not_requested", paid_delivery_authorized: false });
+  expect(value).not.toHaveProperty("policy_approved");
+  expect(native.calls.find(v => v.path === ad)?.params.fields)
+    .toBe("id,account_id,campaign_id,adset_id,name,status,effective_status,creative{id},issues_info,ad_review_feedback");
+  expect(native.mutations).toEqual([]);
+});
+it("preserves omitted ad review evidence as unknown", async () => {
+  for (const adEvidence of [{}, { issues_info: null, ad_review_feedback: null }]) {
+    mock({ adEvidence });
+    const result = await api("GET", "/paused-ads/" + ad);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ native: { ad: { issues_info: null, ad_review_feedback: null } },
+      paid_delivery_authorized: false });
+  }
+  mock({ adEvidence: { issues_info: [], ad_review_feedback: {} } });
+  expect(await (await api("GET", "/paused-ads/" + ad)).json())
+    .toMatchObject({ native: { ad: { issues_info: [], ad_review_feedback: {} } }, paid_delivery_authorized: false });
+});
+it("rejects malformed native delivery evidence", async () => {
+  const accounts = [{ account_status: "1" }, { account_status: -1 }, { account_status: 1.5 },
+    { account_status: 9007199254740992 }, { disable_reason: false }, { capabilities: "HAS_VALID_PAYMENT_METHODS" },
+    { capabilities: [1] }, { capabilities: [{}] }];
+  for (const [index, accountEvidence] of accounts.entries()) {
+    const native = mock({ accountEvidence });
+    expect((await api("GET", "/creative-assets")).status).toBe(502);
+    const write = await api("POST", "/paused-ads", body, "malformed-account-" + index);
+    expect(write.status).toBe(502);
+    expect(await write.json()).toMatchObject({ error: "meta_invalid_native_response", paid_delivery_authorized: false });
+    expect(native.mutations).toEqual([]);
+  }
+  const ads = [{ issues_info: {} }, { issues_info: [null] }, { issues_info: [[]] }, { issues_info: [1] },
+    { ad_review_feedback: [] }, { ad_review_feedback: "feedback" }, { ad_review_feedback: 1 }];
+  for (const [index, adEvidence] of ads.entries()) {
+    const native = mock({ adEvidence });
+    expect((await api("GET", "/paused-ads/" + ad)).status).toBe(502);
+    const write = await api("POST", "/paused-ads", body, "malformed-ad-" + index);
+    expect(write.status).toBe(502);
+    expect(await write.json()).toMatchObject({ error: "meta_invalid_native_response", status: "write_unverified",
+      creative_id: creative, ad_id: ad, paid_delivery_authorized: false });
+    expect(native.mutations).toEqual(["act_" + account + "/adcreatives", "act_" + account + "/ads"]);
+  }
+});
 
 it("discovers eligible Pages images and existing campaigns without exposing Page tokens", async () => {
   mock({ paged: true });

@@ -1,3 +1,7 @@
+# v0.15.0
+
+Expose native Meta account status, disable reason and capabilities in existing asset reads, and native ad issue/review feedback in paused-ad reads. Preserve omitted evidence as unknown, reject malformed provider shapes and retain acknowledged identities when post-write verification fails. Keep payment details private and paid delivery unauthorized.
+
 # v0.14.3
 
 Accept Meta’s equivalent single OR-interest group during paused audience and ad verification. Preserve native evidence and reject ambiguous or changed targeting.
