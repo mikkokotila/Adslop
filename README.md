@@ -32,6 +32,14 @@ To verify the first executable money-in/money-out capability, run `corepack pnpm
 
 CodeQL follows the governance package's documented private-repository fallback. Its reactivation is tracked separately. Public package publication remains disabled, and no documentation site has been deployed.
 
+## Explicit Google campaign geography and language
+
+Authenticated `GET /v1/google-ads/accounts/{account_id}/paused-search-campaigns/{campaign_id}/targeting` reads a PAUSED Search campaign's current native criteria and constants. Empty country or language criteria are reported as empty, with `geography_and_language_bounded: false`; no country or language is assumed. Removed criteria are excluded, and paused positive criteria do not establish active bounds.
+
+`PUT` on the same path accepts only explicit `countries` and `languages`, for example `{"countries":["US"],"languages":["en"]}`. These values are examples, not defaults. Each list must contain 1–20 unique native codes. Country codes are uppercase ISO-style codes; language codes must resolve exactly in Google's targetable language catalogue. Unknown, disabled or ambiguous constants fail before mutation. The path verifies native account ownership and requires a PAUSED Search campaign.
+
+One atomic GoogleAds mutation replaces positive location/language criteria, sets presence-only positive geography and explicitly retains campaign PAUSED status. It preserves negative geography, device criteria and other unrelated criteria. Independent native readback must match the requested constants, presence setting, paused state and preserved criteria. An identical verified configuration sends no mutation. A lost response or unverifiable readback reports `write_unverified` and the known campaign; writes are never automatically retried. Native configuration is not paid-launch approval or proof of settled spend: responses retain `launch_ready: false` and `paid_delivery_authorized: false`.
+
 ## Meta paused image ads
 
 `GET /v1/meta/accounts/{account_id}/creative-assets` reads the account, eligible advertising Pages, native image hashes, campaigns, ads, creatives and granted token permissions. Each collection reports `available` or `unavailable`; an inaccessible Page catalog is not an empty list. Page access tokens are never returned. This inventory is read-only.
