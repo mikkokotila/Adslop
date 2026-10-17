@@ -85,6 +85,12 @@ A verified paused configuration is **not approval to run, proof of platform ad r
 
 ## Meta paused audience preparation
 
+Native readback accepts either top-level `interests` or one interest-only
+`flexible_spec` OR group, as Meta may normalize the same audience during native
+review. Mixed representations, multiple groups, additional group predicates and
+malformed or duplicate interest IDs fail verification. The original native
+targeting remains visible; this does not disable or conceal audience expansion.
+
 First discover genuine Meta interest IDs with authenticated `GET /v1/meta/targeting-interests?q=astrology`. The response records `source=meta_targeting_search`, `targeting_mode=AUDIENCE_INTERESTS`, and each source ID/name. This searches the interest catalog rather than specifying positive query keywords.
 
 The authenticated Worker offers `POST /v1/meta/accounts/{account_id}/paused-audience-campaigns` with `{"name":"Eightchord | Meta | Paused","targeting_mode":"AUDIENCE_INTERESTS","daily_budget_minor":"500","countries":["US"],"interest_ids":["verified-native-interest-id"]}`. The API requires real, source-verified Meta interest IDs, an explicitly selected country and USD-account-local currency minor-unit daily budget. It creates an `OUTCOME_TRAFFIC` campaign and `LINK_CLICKS` ad set with `PAUSED` status, then independently reads back native status, audience and budget. It never activates paid delivery. A partial, uncertain or unverified write is reported as `write_unverified`; do not retry creation automatically. `GET /v1/meta/accounts/{account_id}/paused-audience-campaigns/{campaign_id}` verifies a paused native campaign. **No ad or creative is created**: that requires an authorized Facebook Page, real approved creative and an additional reviewed capability. This is interest-based audience targeting, **not** keyword-matched inventory. Your operator authorization permits this explicitly as a Meta-specific fallback; it does not establish positive keyword matching. `ads_management` and the ad-account write grant are required; `ads_read` alone is insufficient. Campaign preparation is not equivalent to completed two-platform campaign publication.

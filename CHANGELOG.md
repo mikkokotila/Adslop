@@ -1,3 +1,7 @@
+# v0.14.3
+
+Accept Meta’s equivalent single OR-interest group during paused audience and ad verification. Preserve native evidence and reject ambiguous or changed targeting.
+
 # v0.14.2
 
 Verify Meta creative content independently of provider-assigned library names, and recover paused-ad preparation by explicitly reusing an acknowledged, independently verified creative without creating a duplicate.

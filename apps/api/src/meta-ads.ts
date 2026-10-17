@@ -1,5 +1,5 @@
 /** Page and image evidence, and pause-only Meta link ads with native readback. */
-import { metaGraph, readPausedMetaScope, MetaCampaignError } from "./meta-campaigns";
+import { metaGraph, readPausedMetaScope, MetaCampaignError, metaInterestIds } from "./meta-campaigns";
 
 type Obj = Record<string, unknown>;
 type Identity = { account_id: string; campaign_id?: string; adset_id?: string;
@@ -170,7 +170,7 @@ function checkParents(scope: Awaited<ReturnType<typeof readPausedMetaScope>>, co
   const adset = object(scope.adset), targeting = object(adset.targeting);
   equal(adset.daily_budget, config.budget);
   sameSet(object(targeting.geo_locations).countries, config.countries);
-  sameSet(array(targeting.interests).map(v => object(v).id), config.interests);
+  sameSet(metaInterestIds(targeting), config.interests);
 }
 function creativeDetails(native: Obj, accountId: string, creativeId: string): Obj {
   equal(native.id, creativeId); equal(native.account_id, accountId);

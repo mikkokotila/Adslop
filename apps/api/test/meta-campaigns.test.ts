@@ -186,3 +186,68 @@ it("preserves unrelated money ledger observation retrieval routing",async()=>{
   expect(await res.json()).toMatchObject({error:"not_found"});
   expect(fetch).not.toHaveBeenCalled();
 });
+
+function nativeAudience(targeting: Record<string, unknown>) {
+  const fake = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    if (init?.method === "POST" && path.endsWith("/campaigns")) return Response.json({id:"111"});
+    if (init?.method === "POST" && path.endsWith("/adsets")) {
+      const sent = JSON.parse(new URLSearchParams(String(init.body)).get("targeting")!);
+      expect(sent).toEqual({geo_locations:{countries:["US"]},interests:[{id:"6000000000001"}]});
+      return Response.json({id:"222"});
+    }
+    if (path.endsWith("/111")) return Response.json({id:"111",account_id:"1390405164595271",
+      status:"PAUSED",objective:"OUTCOME_TRAFFIC"});
+    if (path.endsWith("/222")) return Response.json({id:"222",account_id:"1390405164595271",
+      campaign_id:"111",status:"PAUSED",daily_budget:"500",optimization_goal:"LINK_CLICKS",
+      billing_event:"IMPRESSIONS",targeting});
+    throw Error("unexpected native audience path");
+  });
+  vi.stubGlobal("fetch",fake);
+  return fake;
+}
+it("reads a paused audience after native OR-interest normalization",async()=>{
+  const targeting={geo_locations:{countries:["US"]},
+    flexible_spec:[{interests:[{id:"6000000000001",name:"Native interest"}]}],
+    targeting_automation:{advantage_audience:1}};
+  const fake=nativeAudience(targeting);
+  const result=await invoke("GET","/111/adsets/222");
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({status:"verified_paused",
+    targeting_mode:"AUDIENCE_INTERESTS",native:{adset:{targeting}},paid_delivery_authorized:false});
+  expect(fake.mock.calls.every(([,init])=>init?.method==="GET")).toBe(true);
+});
+it("verifies created audiences after native OR-interest normalization",async()=>{
+  const targeting={geo_locations:{countries:["US"]},
+    flexible_spec:[{interests:[{id:"6000000000001"}]}]};
+  const fake=nativeAudience(targeting);
+  const result=await invoke("POST","",config);
+  expect(result.status).toBe(201);
+  expect(await result.json()).toMatchObject({status:"verified_paused",
+    native:{adset:{targeting}},paid_delivery_authorized:false});
+  expect(fake.mock.calls.filter(([,init])=>init?.method==="POST")).toHaveLength(2);
+});
+it("rejects ambiguous native interest groups",async()=>{
+  const interests=[{id:"6000000000001"}];
+  const invalid: Array<[Record<string,unknown>,number]> = [
+    [{flexible_spec:[]},409],
+    [{flexible_spec:[{interests},{interests}]},409],
+    [{interests,flexible_spec:[{interests}]},409],
+    [{flexible_spec:[{interests,behaviors:[{id:"6000000000002"}]}]},409],
+    [{flexible_spec:[{interests,unknown_predicate:[]}]},409],
+    [{flexible_spec:[{interests:[]}]},409],
+    [{flexible_spec:[{interests:[...interests,...interests]}]},409],
+    [{flexible_spec:[{interests:[{id:"not-native"}]}]},409],
+    [{flexible_spec:[{interests:[{id:6000000000001}]}]},409],
+    [{flexible_spec:null},409],
+    [{flexible_spec:[null]},502],
+    [{flexible_spec:[{interests:[null]}]},502],
+  ];
+  for (const [shape,status] of invalid) {
+    const fake=nativeAudience({geo_locations:{countries:["US"]},...shape});
+    const result=await invoke("GET","/111/adsets/222");
+    expect(result.status).toBe(status);
+    expect(await result.json()).toMatchObject({paid_delivery_authorized:false});
+    expect(fake.mock.calls.every(([,init])=>init?.method==="GET")).toBe(true);
+  }
+});
