@@ -121,9 +121,16 @@ it("sets and verifies native countries and languages", async () => {
   expect(native.mutations).toHaveLength(2);
   expect(native.mutations[1]).toHaveLength(5);
   expect(native.criteria().filter(c => c.negative || c.type === "DEVICE")).toEqual(unrelated);
-  expect((await call("PUT", replacement)).status).toBe(200);
-  expect(native.mutations).toHaveLength(2);
-  expect(await (await call()).json()).toMatchObject({ countries: [{ code: "US" }], languages: [{ code: "en" }], geography_and_language_bounded: true });
+  const country = native.criteria().find(c => c.type === "LOCATION" && !c.negative);
+  const languageOnly = { countries: ["US"], languages: ["fi"] };
+  expect((await call("PUT", languageOnly)).status).toBe(200);
+  expect(native.mutations).toHaveLength(3);
+  expect(native.mutations[2]).toHaveLength(3);
+  expect(native.criteria().find(c => c.type === "LOCATION" && !c.negative)).toEqual(country);
+  expect(native.mutations[2].some(op => op.campaignCriterionOperation?.remove === country?.resourceName)).toBe(false);
+  expect((await call("PUT", languageOnly)).status).toBe(200);
+  expect(native.mutations).toHaveLength(3);
+  expect(await (await call()).json()).toMatchObject({ countries: [{ code: "US" }], languages: [{ code: "fi" }], geography_and_language_bounded: true });
 });
 
 it("refuses unsafe or unverifiable targeting writes", async () => {

@@ -69,15 +69,16 @@ async function constants(ctx: Context, kind: "country" | "language", values: str
 function positive(criterion: Obj): boolean {
   return criterion.negative === false && ["LOCATION", "LANGUAGE"].includes(String(criterion.type));
 }
+function targetResource(criterion: Obj): string {
+  const location = criterion.type === "LOCATION";
+  const value = object(criterion[location ? "location" : "language"])[location ? "geoTargetConstant" : "languageConstant"];
+  if (typeof value !== "string" || !(location ? /^geoTargetConstants\/[1-9][0-9]*$/ : /^languageConstants\/[1-9][0-9]*$/).test(value)) {
+    throw new TargetingError("google_ads_targeting_invalid_native_constant");
+  }
+  return value;
+}
 function criterionResources(criteria: Obj[], kind: "LOCATION" | "LANGUAGE"): string[] {
-  return criteria.filter(c => c.negative === false && c.type === kind && c.status === "ENABLED").map(c => {
-    const location = kind === "LOCATION";
-    const value = object(c[location ? "location" : "language"])[location ? "geoTargetConstant" : "languageConstant"];
-    if (typeof value !== "string" || !(location ? /^geoTargetConstants\/[1-9][0-9]*$/ : /^languageConstants\/[1-9][0-9]*$/).test(value)) {
-      throw new TargetingError("google_ads_targeting_invalid_native_constant");
-    }
-    return value;
-  });
+  return criteria.filter(c => c.negative === false && c.type === kind && c.status === "ENABLED").map(targetResource);
 }
 async function snapshot(ctx: Context): Promise<Snapshot> {
   const rows = await query(ctx, "SELECT campaign.id, campaign.resource_name, campaign.status, campaign.advertising_channel_type, " +
@@ -165,12 +166,15 @@ export async function handleGoogleTargeting(request: Request, url: URL, env: Goo
       value.criteria.filter(positive).every(c => c.status === "ENABLED") &&
       object(value.campaign.geoTargetTypeSetting).positiveGeoTargetType === "PRESENCE";
     if (!matches(before)) {
+      const requested = new Set([...countries, ...languages].map(c => c.resource_name));
+      const retained = new Set(before.criteria.filter(positive).filter(c => c.status === "ENABLED" && requested.has(targetResource(c))).map(targetResource));
+      const removed = before.criteria.filter(positive).filter(c => c.status !== "ENABLED" || !retained.has(targetResource(c)));
       const operations: Obj[] = [{ campaignOperation: {
         update: { resourceName: resource(ctx), status: "PAUSED", geoTargetTypeSetting: { positiveGeoTargetType: "PRESENCE" } },
         updateMask: "status,geo_target_type_setting.positive_geo_target_type",
-      } }, ...before.criteria.filter(positive).map(c => ({ campaignCriterionOperation: { remove: c.resourceName } })),
-      ...countries.map(c => ({ campaignCriterionOperation: { create: { campaign: resource(ctx), location: { geoTargetConstant: c.resource_name } } } })),
-      ...languages.map(c => ({ campaignCriterionOperation: { create: { campaign: resource(ctx), language: { languageConstant: c.resource_name } } } }))];
+      } }, ...removed.map(c => ({ campaignCriterionOperation: { remove: c.resourceName } })),
+      ...countries.filter(c => !retained.has(c.resource_name)).map(c => ({ campaignCriterionOperation: { create: { campaign: resource(ctx), location: { geoTargetConstant: c.resource_name } } } })),
+      ...languages.filter(c => !retained.has(c.resource_name)).map(c => ({ campaignCriterionOperation: { create: { campaign: resource(ctx), language: { languageConstant: c.resource_name } } } }))];
       writeRequested = true;
       const acknowledgment = object(await client.request("/customers/" + ctx.account + "/googleAds:mutate",
         { partialFailure: false, mutateOperations: operations }, ctx.login));
