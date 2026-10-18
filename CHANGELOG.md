@@ -1,3 +1,7 @@
+# v0.16.1
+
+Require one isolated browser window, ordered prepared tabs and a comprehensive form for necessary human input after autonomous work. Preserve decisions and keep credential transfers with the agent.
+
 # v0.16.0
 
 Add an explicit Google Search total-budget alternative with a required account-local start and end schedule. Create every resource paused, independently verify the exact native total and dates, reject daily updates to total budgets, and preserve cap and schedule through name-only changes. Retain acknowledged IDs on failed verification and grant no paid activation authority.

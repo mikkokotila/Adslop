@@ -27,6 +27,32 @@ Distinguish operational correctness, attributed revenue, and experimentally
 demonstrated incremental revenue. A phase is complete only when its promised
 marketer capability is demonstrated; passing generic tooling alone is not enough.
 
+## Batch necessary human input into one prepared handoff
+
+Complete every authorized action that can proceed without the operator first.
+Before asking, establish that the missing fact, decision or mandatory human action
+actually blocks the remaining work and cannot reasonably wait until the final batch.
+
+- Use one isolated browser window, with prepared tabs ordered left to right in the
+  same sequence as one comprehensive decision form. Keep unrelated tabs untouched.
+- Put every currently necessary input and approval in that form. For each item,
+  explain the decision, why the operator is needed, the exact account/entity,
+  consequences, and what the agent will complete afterwards. Prefill established
+  facts; provide direct links and exact steps only for actions the human must do.
+- Preserve entered answers and existing authorization. Do not ask the operator to
+  repeat facts, navigate between scattered requests, or relay tokens between pages.
+  Handle authorized credential transfers securely without exposing secrets in the
+  form, chat, source control or ordinary audit records.
+- Distinguish current human blockers, provider dependencies and future conditional
+  decisions. Do not present agent engineering work as an operator task or imply
+  approval of spending, subscriptions, access or launch that was not given.
+- Make a new request only when a genuinely new blocker cannot join the final batch;
+  explain the specific reason. Respect mandatory human-only actions and confirmation
+  rules; batching never substitutes for required consent.
+
+This keeps the marketer's intervention focused on decisions needed to establish
+reliable subscription receipts versus advertising spend.
+
 ## Own every pull request until **every** merge gate is green
 
 **Every PR is the agent's responsibility through actual GitHub merge readiness.
