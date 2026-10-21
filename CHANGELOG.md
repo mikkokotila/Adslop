@@ -1,3 +1,7 @@
+# v0.16.2
+
+- Stop automatic Copilot code review on every push; reviews remain available on request.
+
 # v0.16.1
 
 Require one isolated browser window, ordered prepared tabs and a comprehensive form for necessary human input after autonomous work. Preserve decisions and keep credential transfers with the agent.
