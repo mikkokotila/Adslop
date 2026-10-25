@@ -51,11 +51,12 @@ test('one tag connects two differently configured sites through real browser COR
     let secondOrigin;
     const serve = (request, response) => {
       const product = new URL(request.url, 'http://local').pathname.startsWith('/another') ? 'another' : 'store';
+      const destination = request.headers.host === new URL(secondOrigin).host ? firstOrigin : secondOrigin;
       response.setHeader('Content-Type', 'text/html');
       response.end(`<html><head><script src="${api}/v1/sites/${product}/sandbox/tag.js"></script></head><body>
-        <a id="next" href="${secondOrigin}/purchase">Continue</a><a id="outside" href="https://example.org/">Outside</a>
+        <a id="next" href="${destination}/purchase">Continue</a><a id="outside" href="https://example.org/">Outside</a>
         <a id="fragment" href="#pricing">Pricing</a><div id="pricing">Pricing</div><a id="relative" href="?tab=details">Details</a>
-        <a id="protocol-relative" href="${secondOrigin.replace('http:', '')}/purchase">Other origin</a></body></html>`);
+        <a id="protocol-relative" href="${destination.replace('http:', '')}/purchase">Other origin</a></body></html>`);
     };
     first = createServer(serve); second = createServer(serve);
     const firstOrigin = await listen(first); secondOrigin = await listen(second);
