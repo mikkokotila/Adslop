@@ -214,6 +214,69 @@ Every delivery PR closes one open slice issue, stays within its declared file sc
 
 The adopted repository foundation uses the MIT license. See [LICENSE](LICENSE) for the permission terms and required copyright notice, and [THIRD_PARTY.md](THIRD_PARTY.md) for dependency information.
 
+## Connect a website
+
+Register each product with authenticated `PUT /v1/sites/{product_id}/{live|sandbox}`.
+The JSON body contains `origins` (exact HTTPS origins; loopback HTTP is allowed for
+local verification), `attribution_window_days` (1–90), `max_visits_per_minute`
+(1–10,000 for that product/mode), and `campaigns`. Each named campaign maps to
+`{ "provider": "google" | "meta", "account_id": "native account ID", "campaign_id": "native campaign ID" }`.
+The named reference is passed as `?adslop_campaign=...` in a destination link.
+An empty campaign map supports organic visits. Prices and financial credentials
+remain in the existing payment connection; use the same configured product ID.
+
+Save that configuration as `site.json`, then register it with operator credentials:
+
+```sh
+curl --fail-with-body --request PUT \
+  "$ADSLOP_URL/v1/sites/$PRODUCT_ID/sandbox" \
+  --header "Authorization: Bearer $API_TOKEN" \
+  --header 'Content-Type: application/json' --data-binary @site.json
+```
+
+`GET` on that setup route returns the current revision, collection count and
+`tag_url`. Load that JavaScript on the registered website and product origins.
+The tag collects nothing until the site's consent integration calls
+`await window.adslop.start()`. It exposes `reference()`, `decorate(url)` and
+`stop()`. It stores only a reference/expiry in sessionStorage, forwards the
+reference between different registered origins and removes captured tracking parameters
+from the current URL. It never records page URLs, forms, emails or referrers.
+Ordinary same-origin links keep their original URL and sessionStorage context;
+new-tab/window activation carries the reference explicitly, including noopener
+links and context-menu destinations. Relative links follow the document's base URL. Fragment links and History
+API routes within the current page are not rewritten. Programmatic navigation
+can use `decorate(url, true)` when opening a new browsing context.
+`stop()` clears local context and prevents a pending response restoring it;
+already collected evidence is retained. Collection failures reject the promise
+and emit `adslop:error`; `adslop:ready` confirms a reference was received.
+
+For Stripe subscriptions, the backend checkout hook is one optional field:
+
+```js
+const reference = window.adslop?.reference(); // send with your normal checkout request
+// Backend: validate UUID syntax; omit the field when no reference was supplied.
+parameters['subscription_data[metadata][adslop_reference]'] = reference;
+```
+
+Only the opaque reference goes to Stripe. The [native invoice metadata snapshot](https://docs.stripe.com/metadata#copy-metadata-to-another-object)
+links verified payments and refunds to the visit. Adslop's existing signed-webhook
+and GET-only cash reader verifies the financial evidence. The tag never submits
+an amount or grants access; the website owns authentication and fulfillment.
+This increment supports the existing Stripe subscription adapter. Another payment
+provider needs its own verified cash adapter, rather than browser-reported revenue.
+
+Authenticated `GET /v1/sites/{product_id}/{mode}/report?currency=USD&from=2026-10-25T00:00:00.000Z&to=2026-10-26T00:00:00.000Z`
+returns existing native cash grouped by the frozen campaign mapping and explicit
+unlinked reasons. UTC ranges include `from` and exclude `to`, with at most 366 days
+and 10,000 effects. The native receipt timestamp has one-second precision: its
+second must overlap the visit's configured window. Refunds retain their original
+receipt's association. Renewals outside that window remain
+unlinked. Browser campaign parameters support attribution, not proof of an ad
+click or incremental lift. Cash identities and the dated economics API are unchanged.
+Missing references, another product/mode, invalid metadata and conflicting native
+references never manufacture campaign revenue or duplicate receipts. Coverage is
+unverified; setup and observed collection are separate from native payment acceptance.
+
 ## Stripe subscription cash
 
 ISK and UGX require explicit normalization of Stripe's special wire-unit scale and are currently quarantined, not interpreted with an incorrect ledger scale. See [Stripe currency special cases](https://docs.stripe.com/currencies).

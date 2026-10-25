@@ -39,7 +39,7 @@ jobs:
         run: npm --prefix docs-site ci
 
       - name: Install documentation browser
-        run: npm --prefix docs-site exec -- playwright install --with-deps chromium
+        run: npm --prefix docs-site exec -- playwright install --with-deps chromium webkit
 
       - name: Audit documentation dependencies
         run: npm --prefix docs-site run security:audit
@@ -59,6 +59,7 @@ jobs:
         run: |
           corepack pnpm install --frozen-lockfile
           corepack pnpm run check
+          corepack pnpm run test:browser
 
       - name: Set up lint venv
         run: python -m venv .venv-lint

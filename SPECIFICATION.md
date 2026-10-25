@@ -166,6 +166,14 @@ Forwarding a conversion to an advertising platform is a separate recorded operat
 
 ## Collection and analytical data architecture
 
+Implementation checkpoint, 25 October 2026: the first generic site connection
+stores nonfinancial browser context synchronously through the existing Worker's
+product-scoped JSON API. Native Stripe invoice metadata links that context to
+independently admitted cash. This increment does not collect browser visits
+through Bunny logs or forward the same Stripe receipt through a second source.
+The log-based architecture below remains planned; this increment does not establish
+its durability, recovery or live-collection acceptance.
+
 The initial collection design encodes the required event fields in the incoming request URL's query parameters, including a stable event identity and schema version. The request may use POST, but this path does not depend on retaining its body. Adslop reads Bunny access logs approximately every minute and reconstructs the event from the logged fields. Mikko accepts the documented three-day source-retention window for this polling model. Bunny's standard Logging API v2 includes the query string in `path` and the composed `url`; extended logging is unnecessary for these fields. The configured endpoint must belong to a logging-enabled Pull Zone, and its query encoding and actual logging behavior must be validated before live use. The [research record](docs/Reference/Revenue-Engine-Research.md) records that contract, current pricing, and the implementation proposal.
 
 Request acknowledgment, observation in a retrieved log, and canonical event admission are distinct states. A successful edge HTTP response establishes that the request was handled; it does not establish that its log entry is already available or that Adslop has admitted the event. A retrieved entry establishes a source observation. Canonical admission occurs when Adslop validates the decoded event and durably commits its identity, content, receipt, and provenance together. The original source observation, or its retained content-addressed representation, remains linked to the admitted event. This collection path does not require a synchronous database write before the edge responds.

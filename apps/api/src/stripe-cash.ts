@@ -1,6 +1,7 @@
 /** Interpret native Stripe subscription cash, not checkout state or earned revenue. */
 import { StripeError, StripeReader, stripeEvent, stripeId, stripeMoney, stripeObject,
   stripeTime, stripeProductId, type StripeEvent, type StripeObject } from "./stripe";
+import { siteReference } from "./site-connection";
 
 export interface StripeCashEffect {
   resource_id: string;
@@ -25,6 +26,7 @@ export interface StripeCashBatch {
   invoice_id: string | null;
   reason: string | null;
   pending_refunds: string[];
+  site_reference?: string | null;
 }
 export interface StripeResolution {
   invoice_id: string | null; charge_id: string | null; product_id?: string; currency?: string;
@@ -177,7 +179,11 @@ export async function collectStripeInvoice(client: StripeReader, invoiceId: stri
   if (refunded > total || refunded !== stripeMoney(charge.amount_refunded)) {
     throw new StripeError("stripe_refund_total_mismatch", 503, true);
   }
-  return { effects, invoice_id: invoiceId, reason: null, pending_refunds: pending.sort() };
+  const metadata = stripeObject(parent.subscription_details).metadata;
+  const rawReference = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as StripeObject).adslop_reference : undefined;
+  const reference = rawReference === undefined ? null : siteReference(rawReference) ? rawReference : "invalid";
+  return { effects, invoice_id: invoiceId, reason: null, pending_refunds: pending.sort(), site_reference: reference };
 }
 export async function collectStripeEvent(client: StripeReader, eventId: string,
   expected?: StripeEvent, resolution: StripeResolution = { invoice_id: null, charge_id: null }):

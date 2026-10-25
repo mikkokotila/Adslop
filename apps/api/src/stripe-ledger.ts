@@ -2,6 +2,7 @@
 import { StripeError, StripeReader, STRIPE_VERSION, type StripeConnection, type StripeEvent,
   type StripeMode } from "./stripe";
 import { collectStripeEvent, collectStripeInvoice, type StripeCashBatch, type StripeCashEffect, type StripeResolution } from "./stripe-cash";
+import { SiteJournal } from "./site-connection";
 
 export interface StripeImport {
   event_id?: string;
@@ -54,6 +55,8 @@ export class StripeJournal {
       if (previous.some(row => !ids.has(row.resource_id))) {
         throw new StripeError("stripe_previously_admitted_effect_missing");
       }
+      if (batch.site_reference !== undefined && batch.effects.length) new SiteJournal(this.sql).invoice(config.mode,
+        config.account_id, batch.invoice_id, batch.effects[0].product_id, batch.site_reference ?? "absent");
     }
     return { created, duplicate };
   }
@@ -95,10 +98,10 @@ export class StripeJournal {
       config.mode, config.account_id, identity, resource, resource).toArray()[0];
     return previous?.invoice_id ?? null;
   }
-  reconciliationBreaks(product: string, currency: string): Record<string, unknown>[] {
+  reconciliationBreaks(product: string, currency: string, mode: StripeMode = "live"): Record<string, unknown>[] {
     // One serialized complete source refresh supersedes previous delivery dispositions for its invoice.
     const rows = this.sql.exec<{ account_id: string; observed_at: string; body: string }>(
-      "SELECT d.account_id,d.observed_at,d.body FROM stripe_deliveries d WHERE d.mode='live' " +
+      "SELECT d.account_id,d.observed_at,d.body FROM stripe_deliveries d WHERE d.mode=? " +
       "AND json_extract(d.body,'$.status') IN ('retryable','quarantined') " +
       "AND d.id=(SELECT MAX(x.id) FROM stripe_deliveries x WHERE x.mode=d.mode AND x.account_id=d.account_id " +
       "AND json_extract(x.body,'$.invoice_id')=json_extract(d.body,'$.invoice_id')) " +
@@ -107,7 +110,7 @@ export class StripeJournal {
       "OR EXISTS(SELECT 1 FROM stripe_deliveries known WHERE known.mode=d.mode AND known.account_id=d.account_id " +
       "AND json_extract(known.body,'$.invoice_id')=json_extract(d.body,'$.invoice_id') " +
       "AND json_extract(known.body,'$.product_id')=? AND json_extract(known.body,'$.currency')=?)) " +
-      "ORDER BY d.id", product, currency, product, currency).toArray();
+      "ORDER BY d.id", mode, product, currency, product, currency).toArray();
     return rows.map(row => {
       const body = JSON.parse(row.body) as Record<string, unknown>;
       return { account_id: row.account_id, invoice_id: body.invoice_id, error: body.error,

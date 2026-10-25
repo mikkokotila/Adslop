@@ -12,6 +12,7 @@ import { handleMetaRequest, readMetaSpendReport, MetaReadError } from "./meta";
 import { handleMetaCampaignRequest } from "./meta-campaigns";
 import { handleMetaAdRequest } from "./meta-ads";
 import { pauseCampaign, pauseHistory, type CampaignPauseProvider } from "./campaign-pause";
+import { SiteJournal } from "./site-connection";
 import {
   interpretBunnyLog, isBunnyPage, queryBunnyLogs,
   type BunnyEvidence, type BunnyConfig,
@@ -92,6 +93,7 @@ export class MoneyLedger extends DurableObject<Env> {
     new StripeJournal(this.ctx.storage.sql).create();
     new GoogleCostJournal(this.ctx.storage.sql).create();
     new MetaCostJournal(this.ctx.storage.sql).create();
+    new SiteJournal(this.ctx.storage.sql).create();
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS campaign_pause_attempts (
         id INTEGER PRIMARY KEY, provider TEXT NOT NULL, account_id TEXT NOT NULL,
@@ -145,6 +147,12 @@ export class MoneyLedger extends DurableObject<Env> {
         to_ms INTEGER NOT NULL, next_offset INTEGER NOT NULL
       )
     `);
+  }
+
+  siteRequest(product: string, mode: StripeMode, operation: string, method: string, body: string,
+    origin: string | null, apiOrigin: string, search: string) {
+    return this.ctx.storage.transactionSync(() => new SiteJournal(this.ctx.storage.sql)
+      .handle(product, mode, operation, method, body, origin, apiOrigin, search));
   }
 
   async campaignPause(provider: CampaignPauseProvider, account: string, campaign: string,
@@ -619,6 +627,33 @@ function response(error: string, status: number): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const stripeUrl = new URL(request.url);
+    const site = /^\/v1\/sites\/([^/]{1,384})\/(live|sandbox)(?:\/(tag\.js|visits|report))?$/.exec(stripeUrl.pathname);
+    if (site) {
+      const operation = site[3] ?? "configuration";
+      if (!["tag.js", "visits"].includes(operation)) {
+        if (!env.API_TOKEN) return response("api_token_not_configured", 503);
+        if (!await authorized(request.headers.get("Authorization"), env.API_TOKEN)) return response("unauthorized", 401);
+      }
+      let body = "";
+      if (["PUT", "POST"].includes(request.method)) {
+        if (request.headers.get("Content-Type")?.split(";")[0] !== "application/json") return response("site_json_required", 415);
+        try { body = new TextDecoder().decode(await boundedBytes(request, 16384)); }
+        catch (error) {
+          if (error instanceof StripeError) return response("site_request_too_large", 413);
+          throw error;
+        }
+      }
+      const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
+      let product: string;
+      try { product = decodeURIComponent(site[1]); }
+      catch (error) {
+        if (error instanceof URIError) return response("site_invalid_product", 400);
+        throw error;
+      }
+      const result = await ledger.siteRequest(product, site[2] as StripeMode, operation, request.method,
+        body, request.headers.get("Origin"), stripeUrl.origin, stripeUrl.search);
+      return new Response(result.body || null, { status: result.status, headers: result.headers });
+    }
     const stripeRoute = /^\/v1\/stripe\/(live|sandbox)\/(webhook|status|import|events|effects)(?:\/((?:evt|in)_[A-Za-z0-9]{1,96}))?$/.exec(stripeUrl.pathname);
     if (stripeRoute) {
       const mode = stripeRoute[1] as StripeMode;
