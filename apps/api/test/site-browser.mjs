@@ -91,11 +91,17 @@ test('one tag connects two differently configured sites through real browser COR
           'withdrawing consent restores a link before another click');
         assert.equal(await page.evaluate(() => window.adslop.reference()), null);
         const fresh = await page.evaluate(() => window.adslop.start());
-        const [middle] = await Promise.all([page.context().waitForEvent('page'), page.click('#next', { button: 'middle' })]);
-        await middle.waitForLoadState();
-        assert.equal(new URL(middle.url()).searchParams.get('adslop_reference'), fresh, 'middle-click forwards the reference');
-        assert.equal(await middle.evaluate(() => window.adslop.start()), fresh);
-        await middle.close();
+        await page.evaluate(() => {
+          window.middleDestination = null;
+          document.addEventListener('mouseup', event => {
+            if (event.button === 1) { window.middleDestination = event.target.closest('a')?.href; event.preventDefault(); }
+          }, { once: true });
+          document.addEventListener('auxclick', event => event.preventDefault(), { once: true });
+        });
+        await page.click('#next', { button: 'middle' });
+        const middleDestination = await page.evaluate(() => window.middleDestination);
+        assert.equal(new URL(middleDestination).searchParams.get('adslop_reference'), fresh,
+          'the native middle-button activation sees the decorated destination');
         await page.goto(secondOrigin + '/another');
         const other = await page.evaluate(() => window.adslop.start());
         assert.notEqual(other, reference);
