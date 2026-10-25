@@ -230,8 +230,10 @@ remain in the existing payment connection; use the same configured product ID.
 The tag collects nothing until the site's consent integration calls
 `await window.adslop.start()`. It exposes `reference()`, `decorate(url)` and
 `stop()`. It stores only a reference/expiry in sessionStorage, forwards the
-reference on links to registered origins and removes captured tracking parameters
+reference between different registered origins and removes captured tracking parameters
 from the current URL. It never records page URLs, forms, emails or referrers.
+Same-origin links keep their original URL and use the existing sessionStorage
+context; fragment links and History API routes are not rewritten.
 `stop()` clears local context and prevents a pending response restoring it;
 already collected evidence is retained. Collection failures reject the promise
 and emit `adslop:error`; `adslop:ready` confirms a reference was received.

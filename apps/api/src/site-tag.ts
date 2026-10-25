@@ -50,13 +50,16 @@ async function start() {
 function decorate(href) {
   if (!active || !reference) return href;
   const url = new URL(href, location.href);
-  if (origins.includes(url.origin)) url.searchParams.set("adslop_reference", reference);
-  return url.href;
+  if (url.origin !== location.origin && origins.includes(url.origin)) {
+    url.searchParams.set("adslop_reference", reference);
+    return url.href;
+  }
+  return href;
 }
 function decorateClick(event, cleanup = true) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
-    const original = decoratedLinks.get(anchor)?.original || anchor.href;
+    const original = decoratedLinks.get(anchor)?.original ?? anchor.getAttribute("href");
     const decorated = decorate(original);
     if (decorated !== original) {
       decoratedLinks.set(anchor, { original, decorated }); anchor.href = decorated;
@@ -70,7 +73,7 @@ document.addEventListener("auxclick", event => { if (event.button === 1) decorat
 function restore(anchor, decorated) {
   const saved = decoratedLinks.get(anchor);
   if (saved && saved.decorated === decorated) {
-    if (anchor.href === decorated) anchor.href = saved.original;
+    if (anchor.href === decorated) anchor.setAttribute("href", saved.original);
     decoratedLinks.delete(anchor);
   }
 }

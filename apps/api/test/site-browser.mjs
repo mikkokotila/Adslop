@@ -53,7 +53,9 @@ test('one tag connects two differently configured sites through real browser COR
       const product = new URL(request.url, 'http://local').pathname.startsWith('/another') ? 'another' : 'store';
       response.setHeader('Content-Type', 'text/html');
       response.end(`<html><head><script src="${api}/v1/sites/${product}/sandbox/tag.js"></script></head><body>
-        <a id="next" href="${secondOrigin}/purchase">Continue</a><a id="outside" href="https://example.org/">Outside</a></body></html>`);
+        <a id="next" href="${secondOrigin}/purchase">Continue</a><a id="outside" href="https://example.org/">Outside</a>
+        <a id="fragment" href="#pricing">Pricing</a><div id="pricing">Pricing</div><a id="relative" href="?tab=details">Details</a>
+        <a id="protocol-relative" href="${secondOrigin.replace('http:', '')}/purchase">Other origin</a></body></html>`);
     };
     first = createServer(serve); second = createServer(serve);
     const firstOrigin = await listen(first); secondOrigin = await listen(second);
@@ -74,6 +76,17 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(await count('store'), before + 1, 'start is idempotent');
         assert.equal(new URL(page.url()).searchParams.has('adslop_campaign'), false);
         assert.equal(await page.evaluate(() => window.adslop.decorate('https://example.org/')), 'https://example.org/');
+        await page.evaluate(() => { window.sameDocumentMarker = 'kept'; });
+        await page.click('#fragment');
+        assert.equal(await page.evaluate(() => window.sameDocumentMarker), 'kept', 'fragment navigation retains document state');
+        assert.equal(await page.locator('#fragment').getAttribute('href'), '#pricing');
+        await page.evaluate(() => {
+          document.querySelector('#relative').addEventListener('click', event => event.preventDefault(), { once: true });
+          document.querySelector('#relative').click();
+          history.pushState({ view: 'route' }, '', '/changed-route');
+        });
+        assert.equal(await page.locator('#relative').getAttribute('href'), '?tab=details');
+        assert.equal(await page.locator('#relative').evaluate(anchor => new URL(anchor.href).pathname), '/changed-route');
         await page.click('#next');
         await page.waitForLoadState();
         assert.equal(new URL(page.url()).searchParams.get('adslop_reference'), reference);
@@ -90,6 +103,13 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(new URL(await page.locator('#next').getAttribute('href')).searchParams.has('adslop_reference'), false,
           'withdrawing consent restores a link before another click');
         assert.equal(await page.evaluate(() => window.adslop.reference()), null);
+        await page.evaluate(() => {
+          const anchor = document.querySelector('#protocol-relative');
+          window.rawOriginalHref = anchor.getAttribute('href');
+          anchor.addEventListener('click', event => { event.preventDefault(); window.adslop.stop(); }, { once: true });
+          anchor.click();
+        });
+        assert.equal(await page.locator('#protocol-relative').getAttribute('href'), await page.evaluate(() => window.rawOriginalHref));
         const fresh = await page.evaluate(() => window.adslop.start());
         await page.evaluate(() => {
           window.middleDestination = null;
