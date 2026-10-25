@@ -8,6 +8,7 @@ if (window.adslop) throw new Error("Adslop tag already loaded");
 const endpoint = ${JSON.stringify(endpoint)}, origins = ${JSON.stringify(config.origins)};
 const storageKey = "adslop:" + endpoint;
 let active = false, reference = null, pending = null, generation = 0;
+const decoratedLinks = new Map();
 const valid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 function fail(error) {
   window.dispatchEvent(new CustomEvent("adslop:error", { detail: { message: error.message } }));
@@ -36,8 +37,10 @@ async function start() {
     sessionStorage.setItem(storageKey, JSON.stringify({ reference: value.reference, expires_at: value.expires_at }));
     reference = value.reference; active = true;
     if (forwarded || campaign) {
-      url.searchParams.delete("adslop_reference"); url.searchParams.delete("adslop_campaign");
-      history.replaceState(history.state, "", url.href);
+      const current = new URL(location.href);
+      if (forwarded && current.searchParams.get("adslop_reference") === forwarded) current.searchParams.delete("adslop_reference");
+      if (campaign && current.searchParams.get("adslop_campaign") === campaign) current.searchParams.delete("adslop_campaign");
+      if (current.href !== location.href) history.replaceState(history.state, "", current.href);
     }
     window.dispatchEvent(new CustomEvent("adslop:ready", { detail: { reference } }));
     return reference;
@@ -52,9 +55,26 @@ function decorate(href) {
 }
 document.addEventListener("click", event => {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  if (anchor && active && !anchor.hasAttribute("download")) anchor.href = decorate(anchor.href);
+  if (anchor && active && !anchor.hasAttribute("download")) {
+    const original = decoratedLinks.get(anchor)?.original || anchor.href;
+    const decorated = decorate(original);
+    if (decorated !== original) {
+      decoratedLinks.set(anchor, { original, decorated }); anchor.href = decorated;
+      setTimeout(() => restore(anchor, decorated), 0);
+    }
+  }
 }, true);
+function restore(anchor, decorated) {
+  const saved = decoratedLinks.get(anchor);
+  if (saved && saved.decorated === decorated) {
+    if (anchor.href === decorated) anchor.href = saved.original;
+    decoratedLinks.delete(anchor);
+  }
+}
 window.adslop = Object.freeze({ start, reference: () => active ? reference : null, decorate,
-  stop: () => { generation++; active = false; reference = null; pending = null; sessionStorage.removeItem(storageKey); } });
+  stop: () => {
+    generation++; active = false; reference = null; pending = null; sessionStorage.removeItem(storageKey);
+    for (const [anchor, saved] of decoratedLinks) restore(anchor, saved.decorated);
+  } });
 })();`;
 }

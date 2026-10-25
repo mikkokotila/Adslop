@@ -26,6 +26,16 @@ it("registers any product and serves one consent-controlled tag without secrets"
   expect(script).not.toContain("test-only-economic-ledger");
   expect(script).not.toContain("eightchord");
 });
+it("accepts encoded configured product IDs in returned tag and collection URLs", async () => {
+  const base = root.replace('/store/', '/store%3Apro/');
+  const response = await api('', 'PUT', config, operator, base);
+  expect(response.status).toBe(200);
+  const setup = await response.json() as { tag_url: string };
+  const tag = await worker.fetch(new Request(setup.tag_url), env as Env);
+  expect(tag.status).toBe(200);
+  expect(await tag.text()).toContain('/store%3Apro/sandbox/visits');
+  expect((await api('/visits', 'POST', {}, { Origin: config.origins[0], 'Content-Type': 'application/json' }, base)).status).toBe(201);
+});
 it("collects scoped browser context and resumes it across configured origins", async () => {
   await api("", "PUT", config);
   const headers = { Origin: config.origins[0], "Content-Type": "application/json" };

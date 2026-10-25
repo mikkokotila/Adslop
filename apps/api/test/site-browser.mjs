@@ -82,6 +82,15 @@ test('one tag connects two differently configured sites through real browser COR
         await page.reload();
         assert.equal(await page.evaluate(() => window.adslop.start()), reference);
         assert.equal(await count('store'), before + 1);
+        await page.evaluate(() => {
+          const anchor = document.querySelector('#next');
+          anchor.addEventListener('click', event => { event.preventDefault(); window.adslop.stop(); }, { once: true });
+          anchor.click();
+        });
+        assert.equal(new URL(await page.locator('#next').getAttribute('href')).searchParams.has('adslop_reference'), false,
+          'withdrawing consent restores a link before another click');
+        assert.equal(await page.evaluate(() => window.adslop.reference()), null);
+        await page.evaluate(() => window.adslop.start());
         await page.goto(secondOrigin + '/another');
         const other = await page.evaluate(() => window.adslop.start());
         assert.notEqual(other, reference);
@@ -101,6 +110,23 @@ test('one tag connects two differently configured sites through real browser COR
         release();
         assert.equal(await page.evaluate(() => window.pendingStart), null);
         assert.equal(await page.evaluate(() => window.adslop.reference()), null, 'late responses do not restore tracking');
+        await page.unroute('**/v1/sites/another/sandbox/visits');
+        let releaseNavigation, navigationReached;
+        const navigationArrived = new Promise(resolve => { navigationReached = resolve; });
+        const navigationHold = new Promise(resolve => { releaseNavigation = resolve; });
+        await page.route('**/v1/sites/another/sandbox/visits', async route => { navigationReached(); await navigationHold; await route.continue(); });
+        await page.evaluate(() => {
+          history.replaceState({ view: 'original' }, '', '/another?adslop_campaign=search');
+          window.pendingStart = window.adslop.start();
+        });
+        await navigationArrived;
+        await page.evaluate(() => history.pushState({ view: 'changed' }, '', '/another/changed?keep=1'));
+        releaseNavigation();
+        await page.evaluate(() => window.pendingStart);
+        assert.equal(new URL(page.url()).pathname, '/another/changed');
+        assert.equal(new URL(page.url()).search, '?keep=1');
+        assert.deepEqual(await page.evaluate(() => history.state), { view: 'changed' });
+        await page.evaluate(() => window.adslop.stop());
         await page.unroute('**/v1/sites/another/sandbox/visits');
         await page.route('**/v1/sites/another/sandbox/visits', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"fixture_unavailable"}' }));
         const failure = await page.evaluate(async () => {

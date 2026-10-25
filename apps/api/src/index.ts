@@ -627,7 +627,7 @@ function response(error: string, status: number): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const stripeUrl = new URL(request.url);
-    const site = /^\/v1\/sites\/([A-Za-z0-9_.:-]{1,128})\/(live|sandbox)(?:\/(tag\.js|visits|report))?$/.exec(stripeUrl.pathname);
+    const site = /^\/v1\/sites\/([^/]{1,384})\/(live|sandbox)(?:\/(tag\.js|visits|report))?$/.exec(stripeUrl.pathname);
     if (site) {
       const operation = site[3] ?? "configuration";
       if (!["tag.js", "visits"].includes(operation)) {
@@ -644,7 +644,13 @@ export default {
         }
       }
       const ledger = env.MONEY.get(env.MONEY.idFromName("private-operator"));
-      const result = await ledger.siteRequest(site[1], site[2] as StripeMode, operation, request.method,
+      let product: string;
+      try { product = decodeURIComponent(site[1]); }
+      catch (error) {
+        if (error instanceof URIError) return response("site_invalid_product", 400);
+        throw error;
+      }
+      const result = await ledger.siteRequest(product, site[2] as StripeMode, operation, request.method,
         body, request.headers.get("Origin"), stripeUrl.origin, stripeUrl.search);
       return new Response(result.body || null, { status: result.status, headers: result.headers });
     }
