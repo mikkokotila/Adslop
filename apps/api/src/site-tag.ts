@@ -56,23 +56,25 @@ function decorate(href, newContext = false) {
   }
   return href;
 }
-function decorateClick(event, cleanup = true) {
+function decorateClick(event, cleanup = true, openingContext = false) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
-    const original = decoratedLinks.get(anchor)?.original ?? anchor.getAttribute("href");
+    const saved = decoratedLinks.get(anchor);
+    const original = saved?.original ?? anchor.getAttribute("href");
     const target = anchor.getAttribute("target") ?? document.querySelector("base[target]")?.getAttribute("target") ?? "";
-    const newContext = (target !== "" && !["_self", "_parent", "_top"].includes(target.toLowerCase())) ||
+    const newContext = openingContext || (target !== "" && !["_self", "_parent", "_top"].includes(target.toLowerCase())) ||
       event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey;
     const decorated = decorate(original, newContext);
     if (decorated !== original) {
       decoratedLinks.set(anchor, { original, decorated }); anchor.setAttribute("href", decorated);
       if (cleanup) setTimeout(() => restore(anchor, decorated), 0);
-    }
+    } else if (saved) restore(anchor, saved.decorated);
   }
 }
 document.addEventListener("click", event => decorateClick(event), true);
-document.addEventListener("mousedown", event => { if (event.button === 1) decorateClick(event, false); }, true);
+document.addEventListener("mousedown", event => { if (event.button === 1 || event.button === 2) decorateClick(event, false, true); }, true);
 document.addEventListener("auxclick", event => { if (event.button === 1) decorateClick(event); }, true);
+document.addEventListener("contextmenu", event => decorateClick(event, false, true), true);
 function restore(anchor, decorated) {
   const saved = decoratedLinks.get(anchor);
   if (saved && saved.decorated === decorated) {

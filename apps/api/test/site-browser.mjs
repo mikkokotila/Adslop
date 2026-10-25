@@ -142,6 +142,34 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(await newTab.evaluate(() => window.adslop.start()), fresh);
         assert.equal(await count('store'), beforeTab, 'noopener new tabs resume instead of becoming organic visits');
         await newTab.close();
+        await page.evaluate(() => {
+          document.addEventListener('contextmenu', event => {
+            window.contextDestination = event.target.closest('a')?.href; event.preventDefault();
+          }, { once: true });
+        });
+        const contextBounds = await page.locator('#next').boundingBox();
+        assert.ok(contextBounds);
+        await page.mouse.move(contextBounds.x + contextBounds.width / 2, contextBounds.y + contextBounds.height / 2);
+        await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
+        const contextDestination = await page.evaluate(() => window.contextDestination);
+        assert.equal(new URL(contextDestination).searchParams.get('adslop_reference'), fresh,
+          'the native context-menu event sees the prepared destination');
+        const contextPage = await browser.newPage();
+        await contextPage.goto(contextDestination);
+        assert.equal(await contextPage.evaluate(() => window.adslop.start()), fresh);
+        await contextPage.close();
+        await page.evaluate(() => {
+          window.contextMarker = 'kept';
+          document.addEventListener('contextmenu', event => event.preventDefault(), { once: true });
+        });
+        const fragmentBounds = await page.locator('#fragment').boundingBox();
+        assert.ok(fragmentBounds);
+        await page.mouse.move(fragmentBounds.x + fragmentBounds.width / 2, fragmentBounds.y + fragmentBounds.height / 2);
+        await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
+        assert.equal(new URL(await page.locator('#fragment').getAttribute('href')).searchParams.get('adslop_reference'), fresh);
+        await page.click('#fragment');
+        assert.equal(await page.evaluate(() => window.contextMarker), 'kept', 'a dismissed menu does not alter a later fragment navigation');
+        assert.equal(await page.locator('#fragment').getAttribute('href'), '#pricing');
         await page.goto(secondOrigin + '/another');
         const other = await page.evaluate(() => window.adslop.start());
         assert.notEqual(other, reference);

@@ -243,7 +243,7 @@ reference between different registered origins and removes captured tracking par
 from the current URL. It never records page URLs, forms, emails or referrers.
 Ordinary same-origin links keep their original URL and sessionStorage context;
 new-tab/window activation carries the reference explicitly, including noopener
-links. Relative links follow the document's base URL. Fragment links and History
+links and context-menu destinations. Relative links follow the document's base URL. Fragment links and History
 API routes within the current page are not rewritten. Programmatic navigation
 can use `decorate(url, true)` when opening a new browsing context.
 `stop()` clears local context and prevents a pending response restoring it;
