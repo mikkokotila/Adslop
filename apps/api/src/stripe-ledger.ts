@@ -55,8 +55,8 @@ export class StripeJournal {
       if (previous.some(row => !ids.has(row.resource_id))) {
         throw new StripeError("stripe_previously_admitted_effect_missing");
       }
-      if (batch.site_reference && batch.effects.length) new SiteJournal(this.sql).invoice(config.mode,
-        config.account_id, batch.invoice_id, batch.effects[0].product_id, batch.site_reference);
+      if (batch.site_reference !== undefined && batch.effects.length) new SiteJournal(this.sql).invoice(config.mode,
+        config.account_id, batch.invoice_id, batch.effects[0].product_id, batch.site_reference ?? "absent");
     }
     return { created, duplicate };
   }

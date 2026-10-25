@@ -43,7 +43,7 @@ function configuration(raw: unknown): SiteConfiguration {
   for (const [name, rawCampaign] of entries) {
     const campaign = object(rawCampaign);
     keys(campaign, ["provider", "account_id", "campaign_id"]);
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(name) || !["google", "meta"].includes(String(campaign.provider)) ||
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(name) || ["__proto__", "constructor", "prototype"].includes(name) || !["google", "meta"].includes(String(campaign.provider)) ||
         typeof campaign.account_id !== "string" || !(campaign.provider === "google" ? /^[0-9]{10}$/ : /^[1-9][0-9]{0,31}$/).test(campaign.account_id) ||
         typeof campaign.campaign_id !== "string" || !/^[1-9][0-9]{0,31}$/.test(campaign.campaign_id)) throw new SiteError("site_invalid_campaign");
     campaigns[name] = { provider: campaign.provider as "google" | "meta", account_id: campaign.account_id, campaign_id: campaign.campaign_id };
@@ -68,17 +68,12 @@ export class SiteJournal {
       PRIMARY KEY(product_id,mode))`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS site_invoice_references (
       mode TEXT NOT NULL, account_id TEXT NOT NULL, invoice_id TEXT NOT NULL,
-      product_id TEXT NOT NULL, reference TEXT NOT NULL, conflict INTEGER NOT NULL,
-      observed_at TEXT NOT NULL, PRIMARY KEY(mode,account_id,invoice_id))`);
+      product_id TEXT NOT NULL, reference TEXT NOT NULL,
+      observed_at TEXT NOT NULL, PRIMARY KEY(mode,account_id,invoice_id,reference))`);
   }
   invoice(mode: StripeMode, account: string, invoice: string, product: string, reference: string): void {
-    const old = this.sql.exec<{ reference: string; product_id: string }>(
-      "SELECT reference,product_id FROM site_invoice_references WHERE mode=? AND account_id=? AND invoice_id=?",
-      mode, account, invoice).toArray()[0];
-    if (!old) this.sql.exec("INSERT INTO site_invoice_references VALUES (?,?,?,?,?,0,?)",
+    this.sql.exec("INSERT INTO site_invoice_references VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
       mode, account, invoice, product, reference, new Date().toISOString());
-    else if (old.reference !== reference || old.product_id !== product) this.sql.exec(
-      "UPDATE site_invoice_references SET conflict=1 WHERE mode=? AND account_id=? AND invoice_id=?", mode, account, invoice);
   }
   handle(product: string, mode: StripeMode, operation: string, method: string, raw: string,
     origin: string | null, apiOrigin: string, search: string): SiteReply {
