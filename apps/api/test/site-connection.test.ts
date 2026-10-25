@@ -33,7 +33,7 @@ it("collects scoped browser context and resumes it across configured origins", a
   expect(created.status).toBe(201);
   expect(created.headers.get("Access-Control-Allow-Origin")).toBe(config.origins[0]);
   const visit = await created.json() as { reference: string };
-  const resumed = await api("/visits", "POST", visit, { ...headers, Origin: config.origins[1] });
+  const resumed = await api("/visits", "POST", { reference: visit.reference }, { ...headers, Origin: config.origins[1] });
   expect(await resumed.json()).toMatchObject({ reference: visit.reference, reused: true, confidence: "browser_context" });
   expect((await api("/visits", "POST", { amount_minor: 1000 }, headers)).status).toBe(400);
   expect((await api("/visits", "POST", {}, { ...headers, Origin: "https://other.example.test" })).status).toBe(403);
@@ -55,7 +55,7 @@ it("keeps configuration revisions and refuses unknown, foreign and expired refer
   const visit = await (await api("/visits", "POST", {}, headers)).json() as { reference: string };
   for (const target of [root.replace("store", "another"), root.replace("sandbox", "live")]) {
     await api("", "PUT", config, operator, target);
-    expect((await api("/visits", "POST", visit, headers, target)).status).toBe(404);
+    expect((await api("/visits", "POST", { reference: visit.reference }, headers, target)).status).toBe(404);
   }
   expect((await api("/visits", "POST", { campaign: "missing" }, headers)).status).toBe(400);
   expect((await api("/visits", "POST", { ...visit, campaign: "search" }, headers)).status).toBe(400);
@@ -63,7 +63,7 @@ it("keeps configuration revisions and refuses unknown, foreign and expired refer
   await runInDurableObject(runtime.MONEY.get(runtime.MONEY.idFromName("private-operator")), async (_instance, state) => {
     state.storage.sql.exec("UPDATE site_visits SET expires_at=? WHERE reference=?", "2000-01-01T00:00:00.000Z", visit.reference);
   });
-  expect((await api("/visits", "POST", visit, headers)).status).toBe(410);
+  expect((await api("/visits", "POST", { reference: visit.reference }, headers)).status).toBe(410);
   const changed = await (await api("", "PUT", { ...config, attribution_window_days: 7 })).json() as { revision: number };
   expect(changed.revision).toBeGreaterThan(1);
 });

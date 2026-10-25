@@ -701,9 +701,10 @@ async function trackedFixture() {
   return { f, visit, report, paidAt };
 }
 it('joins native invoice metadata to scoped browser context without another cash effect', async () => {
-  const { f, report } = await trackedFixture();
+  const { f, report, paidAt } = await trackedFixture();
   f.event('evt_SiteCash');
   f.refund('re_SitePartial', 255);
+  f.refunds[0].created = paidAt + 86400;
   expect((await api('/sandbox/import', f.runtime, { event_id: 'evt_SiteCash' })).status).toBe(200);
   expect((await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) })).status).toBe(200);
   const result = await (await siteCall(f, report)).json();
