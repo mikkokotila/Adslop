@@ -712,7 +712,7 @@ it('joins native invoice metadata to scoped browser context without another cash
     observed_net_receipts_minor: '1000', coverage: 'not_verified', incremental_lift: 'unproven',
     groups: [{ campaign: 'search', reason: 'linked', native_campaign: { provider: 'google', account_id: '1234567890', campaign_id: '123' },
       receipts_minor: '1255', refunds_minor: '255', net_receipts_minor: '1000' }] });
-  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_receipts_minor: '0' });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_revenue_minor: 0 });
   await runInDurableObject(f.runtime.MONEY.get(f.runtime.MONEY.idFromName('private-operator')), async (_instance, state) => {
     expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM stripe_effects').toArray()[0].n).toBe(2);
   });
