@@ -59,7 +59,8 @@ it("keeps configuration revisions and refuses unknown, foreign and expired refer
   }
   expect((await api("/visits", "POST", { campaign: "missing" }, headers)).status).toBe(400);
   expect((await api("/visits", "POST", { ...visit, campaign: "search" }, headers)).status).toBe(400);
-  await runInDurableObject(env.MONEY.get(env.MONEY.idFromName("private-operator")), async (_instance, state) => {
+  const runtime = env as Env;
+  await runInDurableObject(runtime.MONEY.get(runtime.MONEY.idFromName("private-operator")), async (_instance, state) => {
     state.storage.sql.exec("UPDATE site_visits SET expires_at=? WHERE reference=?", "2000-01-01T00:00:00.000Z", visit.reference);
   });
   expect((await api("/visits", "POST", visit, headers)).status).toBe(410);
