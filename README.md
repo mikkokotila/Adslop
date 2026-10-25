@@ -232,8 +232,11 @@ The tag collects nothing until the site's consent integration calls
 `stop()`. It stores only a reference/expiry in sessionStorage, forwards the
 reference between different registered origins and removes captured tracking parameters
 from the current URL. It never records page URLs, forms, emails or referrers.
-Same-origin links keep their original URL and use the existing sessionStorage
-context; fragment links and History API routes are not rewritten.
+Ordinary same-origin links keep their original URL and sessionStorage context;
+new-tab/window activation carries the reference explicitly, including noopener
+links. Relative links follow the document's base URL. Fragment links and History
+API routes within the current page are not rewritten. Programmatic navigation
+can use `decorate(url, true)` when opening a new browsing context.
 `stop()` clears local context and prevents a pending response restoring it;
 already collected evidence is retained. Collection failures reject the promise
 and emit `adslop:error`; `adslop:ready` confirms a reference was received.

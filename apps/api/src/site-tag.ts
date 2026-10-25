@@ -47,10 +47,10 @@ async function start() {
   })().catch(fail).finally(() => { if (epoch === generation) pending = null; });
   return pending;
 }
-function decorate(href) {
+function decorate(href, newContext = false) {
   if (!active || !reference) return href;
-  const url = new URL(href, location.href);
-  if (url.origin !== location.origin && origins.includes(url.origin)) {
+  const url = new URL(href, document.baseURI);
+  if ((url.origin !== location.origin || newContext) && origins.includes(url.origin)) {
     url.searchParams.set("adslop_reference", reference);
     return url.href;
   }
@@ -60,9 +60,12 @@ function decorateClick(event, cleanup = true) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
     const original = decoratedLinks.get(anchor)?.original ?? anchor.getAttribute("href");
-    const decorated = decorate(original);
+    const target = anchor.getAttribute("target") ?? document.querySelector("base[target]")?.getAttribute("target") ?? "";
+    const newContext = (target !== "" && !["_self", "_parent", "_top"].includes(target.toLowerCase())) ||
+      event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey;
+    const decorated = decorate(original, newContext);
     if (decorated !== original) {
-      decoratedLinks.set(anchor, { original, decorated }); anchor.href = decorated;
+      decoratedLinks.set(anchor, { original, decorated }); anchor.setAttribute("href", decorated);
       if (cleanup) setTimeout(() => restore(anchor, decorated), 0);
     }
   }
@@ -73,7 +76,7 @@ document.addEventListener("auxclick", event => { if (event.button === 1) decorat
 function restore(anchor, decorated) {
   const saved = decoratedLinks.get(anchor);
   if (saved && saved.decorated === decorated) {
-    if (anchor.href === decorated) anchor.setAttribute("href", saved.original);
+    if (anchor.getAttribute("href") === decorated) anchor.setAttribute("href", saved.original);
     decoratedLinks.delete(anchor);
   }
 }

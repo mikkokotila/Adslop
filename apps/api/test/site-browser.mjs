@@ -53,10 +53,12 @@ test('one tag connects two differently configured sites through real browser COR
       const product = new URL(request.url, 'http://local').pathname.startsWith('/another') ? 'another' : 'store';
       const destination = request.headers.host === new URL(secondOrigin).host ? firstOrigin : secondOrigin;
       response.setHeader('Content-Type', 'text/html');
-      response.end(`<html><head><script src="${api}/v1/sites/${product}/sandbox/tag.js"></script></head><body>
+      const base = request.url.startsWith('/with-base') ? `<base href="${secondOrigin}/base/">` : '';
+      response.end(`<html><head>${base}<script src="${api}/v1/sites/${product}/sandbox/tag.js"></script></head><body>
         <a id="next" href="${destination}/purchase">Continue</a><a id="outside" href="https://example.org/">Outside</a>
         <a id="fragment" href="#pricing">Pricing</a><div id="pricing">Pricing</div><a id="relative" href="?tab=details">Details</a>
-        <a id="protocol-relative" href="${destination.replace('http:', '')}/purchase">Other origin</a></body></html>`);
+        <a id="protocol-relative" href="${destination.replace('http:', '')}/purchase">Other origin</a>
+        <a id="new-tab" href="/purchase" target="_blank" rel="noopener">New tab</a><a id="base-relative" href="purchase">Base relative</a></body></html>`);
     };
     first = createServer(serve); second = createServer(serve);
     const firstOrigin = await listen(first); secondOrigin = await listen(second);
@@ -132,6 +134,14 @@ test('one tag connects two differently configured sites through real browser COR
         const middleDestination = await page.evaluate(() => window.middleDestination);
         assert.equal(new URL(middleDestination).searchParams.get('adslop_reference'), fresh,
           'the native middle-button activation sees the decorated destination');
+        const beforeTab = await count('store');
+        const [newTab] = await Promise.all([page.context().waitForEvent('page'), page.click('#new-tab')]);
+        await newTab.waitForURL(url => url.origin === secondOrigin && url.pathname === '/purchase', { waitUntil: 'load' });
+        assert.equal(await newTab.evaluate(() => window.opener === null), true);
+        assert.equal(new URL(newTab.url()).searchParams.get('adslop_reference'), fresh);
+        assert.equal(await newTab.evaluate(() => window.adslop.start()), fresh);
+        assert.equal(await count('store'), beforeTab, 'noopener new tabs resume instead of becoming organic visits');
+        await newTab.close();
         await page.goto(secondOrigin + '/another');
         const other = await page.evaluate(() => window.adslop.start());
         assert.notEqual(other, reference);
@@ -176,6 +186,14 @@ test('one tag connects two differently configured sites through real browser COR
           try { await window.adslop.start(); return false; } catch (error) { return message === error.message; }
         });
         assert.equal(failure, true, 'collection failure is observable');
+        const basePage = await browser.newPage();
+        await basePage.goto(firstOrigin + '/with-base?adslop_campaign=search');
+        const baseReference = await basePage.evaluate(() => window.adslop.start());
+        await basePage.click('#base-relative');
+        await basePage.waitForURL(url => url.origin === secondOrigin && url.pathname === '/base/purchase', { waitUntil: 'load' });
+        assert.equal(new URL(basePage.url()).searchParams.get('adslop_reference'), baseReference);
+        assert.equal(await basePage.evaluate(() => window.adslop.start()), baseReference);
+        await basePage.close();
         await page.close();
       } finally { await browser.close(); }
     }
