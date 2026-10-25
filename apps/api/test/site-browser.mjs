@@ -75,6 +75,7 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(new URL(page.url()).searchParams.has('adslop_campaign'), false);
         assert.equal(await page.evaluate(() => window.adslop.decorate('https://example.org/')), 'https://example.org/');
         await page.click('#next');
+        await page.waitForLoadState();
         assert.equal(new URL(page.url()).searchParams.get('adslop_reference'), reference);
         assert.equal(await page.evaluate(() => window.adslop.start()), reference);
         assert.equal(new URL(page.url()).searchParams.has('adslop_reference'), false);
