@@ -53,18 +53,19 @@ function decorate(href) {
   if (origins.includes(url.origin)) url.searchParams.set("adslop_reference", reference);
   return url.href;
 }
-function decorateClick(event) {
+function decorateClick(event, cleanup = true) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
     const original = decoratedLinks.get(anchor)?.original || anchor.href;
     const decorated = decorate(original);
     if (decorated !== original) {
       decoratedLinks.set(anchor, { original, decorated }); anchor.href = decorated;
-      setTimeout(() => restore(anchor, decorated), 0);
+      if (cleanup) setTimeout(() => restore(anchor, decorated), 0);
     }
   }
 }
-document.addEventListener("click", decorateClick, true);
+document.addEventListener("click", event => decorateClick(event), true);
+document.addEventListener("mousedown", event => { if (event.button === 1) decorateClick(event, false); }, true);
 document.addEventListener("auxclick", event => { if (event.button === 1) decorateClick(event); }, true);
 function restore(anchor, decorated) {
   const saved = decoratedLinks.get(anchor);
