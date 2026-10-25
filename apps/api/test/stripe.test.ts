@@ -680,3 +680,78 @@ it("recovers a signed delivery after correcting connection configuration", async
     .toMatchObject({ effects: [{ resource_id: "ch_ContractFixture", amount_minor: "1255" }], has_more: false });
   expect(await (await economics(runtime)).json()).toMatchObject({ subscription_revenue_minor: 0 });
 });
+
+async function siteCall(f: ReturnType<typeof fixture>, path: string, method = 'GET', body?: object, origin?: string) {
+  const headers: Record<string, string> = { ...operator, 'Content-Type': 'application/json' };
+  if (origin) { delete headers.Authorization; headers.Origin = origin; }
+  return worker.fetch(new Request('https://adslop.test/v1/sites/stripe-test/' + f.config.mode + path,
+    { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) }), f.runtime);
+}
+async function trackedFixture() {
+  const f = fixture();
+  await siteCall(f, '', 'PUT', { origins: ['https://shop.example.test'], attribution_window_days: 30,
+    max_visits_per_minute: 50, campaigns: { search: { provider: 'google', account_id: '1234567890', campaign_id: '123' } } });
+  const visit = await (await siteCall(f, '/visits', 'POST', { campaign: 'search' }, 'https://shop.example.test')).json() as { reference: string };
+  const paidAt = Math.floor(Date.now() / 1000) + 2;
+  f.paid.status_transitions = { paid_at: paidAt };
+  f.invoice.parent = { type: 'subscription_details', subscription_details: {
+    subscription: 'sub_ContractFixture', metadata: { adslop_reference: visit.reference } } };
+  const report = '/report?currency=EUR&from=' + encodeURIComponent(new Date((paidAt - 86400) * 1000).toISOString()) +
+    '&to=' + encodeURIComponent(new Date((paidAt + 86400 * 10) * 1000).toISOString());
+  return { f, visit, report, paidAt };
+}
+it('joins native invoice metadata to scoped browser context without another cash effect', async () => {
+  const { f, report } = await trackedFixture();
+  f.event('evt_SiteCash');
+  f.refund('re_SitePartial', 255);
+  expect((await api('/sandbox/import', f.runtime, { event_id: 'evt_SiteCash' })).status).toBe(200);
+  expect((await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) })).status).toBe(200);
+  const result = await (await siteCall(f, report)).json();
+  expect(result).toMatchObject({ observed_receipts_minor: '1255', observed_refunds_minor: '255',
+    observed_net_receipts_minor: '1000', coverage: 'not_verified', incremental_lift: 'unproven',
+    groups: [{ campaign: 'search', reason: 'linked', native_campaign: { provider: 'google', account_id: '1234567890', campaign_id: '123' },
+      receipts_minor: '1255', refunds_minor: '255', net_receipts_minor: '1000' }] });
+  expect(await (await economics(f.runtime)).json()).toMatchObject({ subscription_receipts_minor: '0' });
+  await runInDurableObject(f.runtime.MONEY.get(f.runtime.MONEY.idFromName('private-operator')), async (_instance, state) => {
+    expect(state.storage.sql.exec<{ n: number }>('SELECT count(*) AS n FROM stripe_effects').toArray()[0].n).toBe(2);
+  });
+});
+it('preserves frozen campaign mappings and leaves unknown references unlinked', async () => {
+  const { f, report } = await trackedFixture();
+  await siteCall(f, '', 'PUT', { origins: ['https://shop.example.test'], attribution_window_days: 30, max_visits_per_minute: 50,
+    campaigns: { search: { provider: 'meta', account_id: '999', campaign_id: '456' } } });
+  await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) });
+  expect(await (await siteCall(f, report)).json()).toMatchObject({ groups: [{ native_campaign: { provider: 'google', campaign_id: '123' } }] });
+});
+it('withholds attribution when the native invoice reference changes without changing cash', async () => {
+  const { f, report } = await trackedFixture();
+  await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) });
+  f.invoice.parent = { type: 'subscription_details', subscription_details: { subscription: 'sub_ContractFixture', metadata: {} } };
+  const repeated = await (await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) })).json();
+  expect(repeated).toMatchObject({ created: 0, duplicate: 1 });
+  expect(await (await siteCall(f, report)).json()).toMatchObject({ observed_net_receipts_minor: '1255',
+    groups: [{ campaign: null, reason: 'reference_conflict', net_receipts_minor: '1255' }] });
+});
+it('separates absent, malformed, unknown and organic references from paid campaign claims', async () => {
+  for (const reference of [undefined, 'not-a-reference', crypto.randomUUID()]) {
+    await reset();
+    const { f, report } = await trackedFixture();
+    f.invoice.parent = { type: 'subscription_details', subscription_details: { subscription: 'sub_ContractFixture',
+      metadata: reference === undefined ? {} : { adslop_reference: reference } } };
+    await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) });
+    expect(await (await siteCall(f, report)).json()).toMatchObject({ observed_net_receipts_minor: '1255',
+      groups: [{ campaign: null, reason: reference === undefined ? 'no_reference' : reference === 'not-a-reference' ? 'invalid_reference' : 'unknown_reference' }] });
+  }
+});
+it('keeps refunds linked to their original receipt and renewals outside the visit window unlinked', async () => {
+  const { f, report, paidAt } = await trackedFixture();
+  f.refund('re_SiteLaterRefund', 255);
+  f.refunds[0].created = paidAt + 86400 * 5;
+  await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) });
+  const later = report.replace(/from=[^&]+/, 'from=' + encodeURIComponent(new Date((paidAt + 86400) * 1000).toISOString()));
+  expect(await (await siteCall(f, later)).json()).toMatchObject({ groups: [{ reason: 'linked', receipts_minor: '0', refunds_minor: '255' }] });
+  await runInDurableObject(f.runtime.MONEY.get(f.runtime.MONEY.idFromName('private-operator')), async (_instance, state) => {
+    state.storage.sql.exec('UPDATE site_visits SET expires_at=?', new Date((paidAt - 1) * 1000).toISOString());
+  });
+  expect(await (await siteCall(f, report)).json()).toMatchObject({ groups: [{ campaign: null, reason: 'outside_visit_window' }] });
+});
