@@ -59,8 +59,10 @@ function decorate(href, newContext = false) {
 function decorateClick(event, cleanup = true, openingContext = false) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
-    const saved = decoratedLinks.get(anchor);
-    const original = saved?.original ?? anchor.getAttribute("href");
+    const current = anchor.getAttribute("href");
+    let saved = decoratedLinks.get(anchor);
+    if (saved && current !== saved.decorated) { decoratedLinks.delete(anchor); saved = null; }
+    const original = saved?.original ?? current;
     const target = anchor.getAttribute("target") ?? document.querySelector("base[target]")?.getAttribute("target") ?? "";
     const newContext = openingContext || (target !== "" && !["_self", "_parent", "_top"].includes(target.toLowerCase())) ||
       event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey;

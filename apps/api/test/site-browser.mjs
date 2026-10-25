@@ -158,6 +158,22 @@ test('one tag connects two differently configured sites through real browser COR
         await contextPage.goto(contextDestination);
         assert.equal(await contextPage.evaluate(() => window.adslop.start()), fresh);
         await contextPage.close();
+        const updatedDestination = await page.evaluate(() => {
+          const anchor = document.querySelector('#next');
+          const updated = new URL('/updated-purchase', anchor.href).href;
+          anchor.setAttribute('href', updated);
+          anchor.addEventListener('click', event => {
+            window.updatedDestination = anchor.href; event.preventDefault();
+          }, { once: true });
+          anchor.click();
+          return updated;
+        });
+        assert.equal(new URL(await page.evaluate(() => window.updatedDestination)).pathname, '/updated-purchase',
+          'a site-owned href update replaces a pending context-menu destination');
+        assert.equal(new URL(await page.evaluate(() => window.updatedDestination)).searchParams.get('adslop_reference'), fresh);
+        await page.waitForTimeout(10);
+        assert.equal(await page.locator('#next').getAttribute('href'), updatedDestination,
+          'restoration preserves the site-owned destination');
         await page.evaluate(() => {
           window.contextMarker = 'kept';
           document.addEventListener('contextmenu', event => event.preventDefault(), { once: true });
