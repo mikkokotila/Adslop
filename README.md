@@ -225,6 +225,15 @@ The named reference is passed as `?adslop_campaign=...` in a destination link.
 An empty campaign map supports organic visits. Prices and financial credentials
 remain in the existing payment connection; use the same configured product ID.
 
+Save that configuration as `site.json`, then register it with operator credentials:
+
+```sh
+curl --fail-with-body --request PUT \
+  "$ADSLOP_URL/v1/sites/$PRODUCT_ID/sandbox" \
+  --header "Authorization: Bearer $API_TOKEN" \
+  --header 'Content-Type: application/json' --data-binary @site.json
+```
+
 `GET` on that setup route returns the current revision, collection count and
 `tag_url`. Load that JavaScript on the registered website and product origins.
 The tag collects nothing until the site's consent integration calls
