@@ -104,12 +104,17 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(new URL(await page.locator('#next').getAttribute('href')).searchParams.has('adslop_reference'), false,
           'withdrawing consent restores a link before another click');
         assert.equal(await page.evaluate(() => window.adslop.reference()), null);
+        const protocolReference = await page.evaluate(() => window.adslop.start());
         await page.evaluate(() => {
           const anchor = document.querySelector('#protocol-relative');
           window.rawOriginalHref = anchor.getAttribute('href');
-          anchor.addEventListener('click', event => { event.preventDefault(); window.adslop.stop(); }, { once: true });
+          anchor.addEventListener('click', event => {
+            window.decoratedProtocolHref = anchor.href;
+            event.preventDefault(); window.adslop.stop();
+          }, { once: true });
           anchor.click();
         });
+        assert.equal(new URL(await page.evaluate(() => window.decoratedProtocolHref)).searchParams.get('adslop_reference'), protocolReference);
         assert.equal(await page.locator('#protocol-relative').getAttribute('href'), await page.evaluate(() => window.rawOriginalHref));
         const fresh = await page.evaluate(() => window.adslop.start());
         await page.evaluate(() => {
@@ -119,7 +124,11 @@ test('one tag connects two differently configured sites through real browser COR
           }, { once: true });
           document.addEventListener('auxclick', event => event.preventDefault(), { once: true });
         });
-        await page.click('#next', { button: 'middle' });
+        const bounds = await page.locator('#next').boundingBox();
+        assert.ok(bounds);
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        await page.mouse.down({ button: 'middle' });
+        await page.mouse.up({ button: 'middle' });
         const middleDestination = await page.evaluate(() => window.middleDestination);
         assert.equal(new URL(middleDestination).searchParams.get('adslop_reference'), fresh,
           'the native middle-button activation sees the decorated destination');
