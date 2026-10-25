@@ -49,6 +49,7 @@ export function siteReport(sql: SqlStorage, product: string, mode: StripeMode, u
   }
   const breaks = new StripeJournal(sql).reconciliationBreaks(product, currency, mode);
   return { product_id: product, mode, currency, period: { from, to, basis: "UTC_inclusive_from_exclusive_to" },
+    cash_basis: "customer_cash_including_tax_before_fees",
     attribution_rule: "native_invoice_reference_and_receipt_second_overlaps_visit_window_v1",
     confidence: "browser_campaign_parameter_linked_to_verified_native_cash", incremental_lift: "unproven",
     observed_receipts_minor: receipts.toString(), observed_refunds_minor: refunds.toString(),

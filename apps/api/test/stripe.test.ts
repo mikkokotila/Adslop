@@ -709,6 +709,7 @@ it('joins native invoice metadata to scoped browser context without another cash
   expect((await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) })).status).toBe(200);
   const result = await (await siteCall(f, report)).json();
   expect(result).toMatchObject({ observed_receipts_minor: '1255', observed_refunds_minor: '255',
+    cash_basis: 'customer_cash_including_tax_before_fees',
     observed_net_receipts_minor: '1000', coverage: 'not_verified', incremental_lift: 'unproven',
     groups: [{ campaign: 'search', reason: 'linked', native_campaign: { provider: 'google', account_id: '1234567890', campaign_id: '123' },
       receipts_minor: '1255', refunds_minor: '255', net_receipts_minor: '1000' }] });
