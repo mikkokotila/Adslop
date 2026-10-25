@@ -53,7 +53,7 @@ function decorate(href) {
   if (origins.includes(url.origin)) url.searchParams.set("adslop_reference", reference);
   return url.href;
 }
-document.addEventListener("click", event => {
+function decorateClick(event) {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (anchor && active && !anchor.hasAttribute("download")) {
     const original = decoratedLinks.get(anchor)?.original || anchor.href;
@@ -63,7 +63,9 @@ document.addEventListener("click", event => {
       setTimeout(() => restore(anchor, decorated), 0);
     }
   }
-}, true);
+}
+document.addEventListener("click", decorateClick, true);
+document.addEventListener("auxclick", event => { if (event.button === 1) decorateClick(event); }, true);
 function restore(anchor, decorated) {
   const saved = decoratedLinks.get(anchor);
   if (saved && saved.decorated === decorated) {

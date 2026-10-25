@@ -54,6 +54,7 @@ it("requires explicit origins, bounded limits and unambiguous campaign identitie
   for (const body of [{ ...config, origins: ["https://store.example.test/path"] }, { ...config, origins: ["http://example.test"] },
     { ...config, attribution_window_days: 0 }, { ...config, max_visits_per_minute: 10001 },
     { ...config, campaigns: { search: { ...config.campaigns.search, account_id: "123" } } }, { ...config, secret: "forbidden" },
+    { ...config, campaigns: { search: { ...config.campaigns.search, provider: ['meta'] } } },
     { ...config, campaigns: JSON.parse('{"__proto__":{"provider":"google","account_id":"1234567890","campaign_id":"123"}}') }]) {
     expect((await api("", "PUT", body)).status).toBe(400);
   }

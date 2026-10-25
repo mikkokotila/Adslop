@@ -756,3 +756,16 @@ it('keeps refunds linked to their original receipt and renewals outside the visi
   });
   expect(await (await siteCall(f, report)).json()).toMatchObject({ groups: [{ campaign: null, reason: 'outside_visit_window' }] });
 });
+
+it('matches the native payment second without inventing millisecond precision', async () => {
+  const { f, report, paidAt, visit } = await trackedFixture();
+  await runInDurableObject(f.runtime.MONEY.get(f.runtime.MONEY.idFromName('private-operator')), async (_instance, state) => {
+    state.storage.sql.exec('UPDATE site_visits SET created_at=? WHERE reference=?', new Date(paidAt * 1000 + 999).toISOString(), visit.reference);
+  });
+  await api('/sandbox/import', f.runtime, { invoice_id: String(f.invoice.id) });
+  expect(await (await siteCall(f, report)).json()).toMatchObject({ groups: [{ campaign: 'search', reason: 'linked' }] });
+  await runInDurableObject(f.runtime.MONEY.get(f.runtime.MONEY.idFromName('private-operator')), async (_instance, state) => {
+    state.storage.sql.exec('UPDATE site_visits SET created_at=? WHERE reference=?', new Date((paidAt + 1) * 1000).toISOString(), visit.reference);
+  });
+  expect(await (await siteCall(f, report)).json()).toMatchObject({ groups: [{ campaign: null, reason: 'outside_visit_window' }] });
+});

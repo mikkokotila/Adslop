@@ -90,7 +90,12 @@ test('one tag connects two differently configured sites through real browser COR
         assert.equal(new URL(await page.locator('#next').getAttribute('href')).searchParams.has('adslop_reference'), false,
           'withdrawing consent restores a link before another click');
         assert.equal(await page.evaluate(() => window.adslop.reference()), null);
-        await page.evaluate(() => window.adslop.start());
+        const fresh = await page.evaluate(() => window.adslop.start());
+        const [middle] = await Promise.all([page.context().waitForEvent('page'), page.click('#next', { button: 'middle' })]);
+        await middle.waitForLoadState();
+        assert.equal(new URL(middle.url()).searchParams.get('adslop_reference'), fresh, 'middle-click forwards the reference');
+        assert.equal(await middle.evaluate(() => window.adslop.start()), fresh);
+        await middle.close();
         await page.goto(secondOrigin + '/another');
         const other = await page.evaluate(() => window.adslop.start());
         assert.notEqual(other, reference);

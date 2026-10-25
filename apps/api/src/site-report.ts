@@ -33,7 +33,8 @@ export function siteReport(sql: SqlStorage, product: string, mode: StripeMode, u
   for (const row of rows) {
     const reason = row.conflict ? "reference_conflict" : row.reference === "invalid" ? "invalid_reference" :
       !row.reference || row.reference === "absent" ? "no_reference" : !row.created_at ? "unknown_reference" :
-      !row.receipt_at || row.receipt_at < row.created_at || row.receipt_at > row.expires_at! ? "outside_visit_window" :
+      !row.receipt_at || Date.parse(row.receipt_at) + 1000 <= Date.parse(row.created_at) ||
+        Date.parse(row.receipt_at) >= Date.parse(row.expires_at!) ? "outside_visit_window" :
       !row.campaign ? "organic" : "linked";
     const linked = reason === "linked", native = linked ? JSON.parse(row.campaign_body!) : null;
     const key = JSON.stringify([linked ? row.campaign : null, native, reason]);
@@ -48,7 +49,7 @@ export function siteReport(sql: SqlStorage, product: string, mode: StripeMode, u
   }
   const breaks = new StripeJournal(sql).reconciliationBreaks(product, currency, mode);
   return { product_id: product, mode, currency, period: { from, to, basis: "UTC_inclusive_from_exclusive_to" },
-    attribution_rule: "native_invoice_reference_and_receipt_within_visit_window_v1",
+    attribution_rule: "native_invoice_reference_and_receipt_second_overlaps_visit_window_v1",
     confidence: "browser_campaign_parameter_linked_to_verified_native_cash", incremental_lift: "unproven",
     observed_receipts_minor: receipts.toString(), observed_refunds_minor: refunds.toString(),
     observed_net_receipts_minor: breaks.length || !rows.length ? null : (receipts - refunds).toString(),

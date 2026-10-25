@@ -43,10 +43,10 @@ function configuration(raw: unknown): SiteConfiguration {
   for (const [name, rawCampaign] of entries) {
     const campaign = object(rawCampaign);
     keys(campaign, ["provider", "account_id", "campaign_id"]);
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(name) || ["__proto__", "constructor", "prototype"].includes(name) || !["google", "meta"].includes(String(campaign.provider)) ||
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(name) || ["__proto__", "constructor", "prototype"].includes(name) || (campaign.provider !== "google" && campaign.provider !== "meta") ||
         typeof campaign.account_id !== "string" || !(campaign.provider === "google" ? /^[0-9]{10}$/ : /^[1-9][0-9]{0,31}$/).test(campaign.account_id) ||
         typeof campaign.campaign_id !== "string" || !/^[1-9][0-9]{0,31}$/.test(campaign.campaign_id)) throw new SiteError("site_invalid_campaign");
-    campaigns[name] = { provider: campaign.provider as "google" | "meta", account_id: campaign.account_id, campaign_id: campaign.campaign_id };
+    campaigns[name] = { provider: campaign.provider, account_id: campaign.account_id, campaign_id: campaign.campaign_id };
   }
   return { origins: [...value.origins].sort(), attribution_window_days: Number(window), max_visits_per_minute: Number(rate), campaigns };
 }

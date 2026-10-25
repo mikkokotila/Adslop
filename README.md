@@ -254,8 +254,9 @@ provider needs its own verified cash adapter, rather than browser-reported reven
 Authenticated `GET /v1/sites/{product_id}/{mode}/report?currency=USD&from=2026-10-25T00:00:00.000Z&to=2026-10-26T00:00:00.000Z`
 returns existing native cash grouped by the frozen campaign mapping and explicit
 unlinked reasons. UTC ranges include `from` and exclude `to`, with at most 366 days
-and 10,000 effects. The original receipt must fall within the visit's configured
-window; its refunds retain that association. Renewals outside that window remain
+and 10,000 effects. The native receipt timestamp has one-second precision: its
+second must overlap the visit's configured window. Refunds retain their original
+receipt's association. Renewals outside that window remain
 unlinked. Browser campaign parameters support attribution, not proof of an ad
 click or incremental lift. Cash identities and the dated economics API are unchanged.
 Missing references, another product/mode, invalid metadata and conflicting native
