@@ -245,3 +245,8 @@ def test_ratchet_gates_have_no_permanent_bootstrap_mode() -> None:
             and f'repo != {seed_q}' in text, (
             f'{name}: the bootstrap probe must require all three conditions'
         )
+
+
+def test_dependency_automation_is_absent() -> None:
+    assert not (REPO_ROOT / '.github/dependabot.yml').exists()
+    assert not (REPO_ROOT / '.github/dependabot.yaml').exists()
