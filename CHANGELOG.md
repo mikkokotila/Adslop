@@ -1,3 +1,7 @@
+# v0.17.1
+
+- Remove Dependabot version-update configuration; automated security fixes are disabled.
+
 # v0.17.0
 
 Add configurable site registration, a consent-controlled browser tag and separate campaign attribution for independently verified Stripe cash. Preserve cash identities, unlinked outcomes and sandbox isolation.
